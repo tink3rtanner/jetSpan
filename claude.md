@@ -1,12 +1,16 @@
 # JetSpan - Claude Context
 
+## Quick Start
+When working on this project, start the dev server:
+```bash
+python -m http.server 8765
+```
+Then open http://localhost:8765/isochrone.html
+
 ## Project Overview
-JetSpan is a collection of interactive map visualizations exploring different cartographic projections and travel time representations.
+JetSpan visualizes flight travel times on a 3D globe using hexagonal isochrone cells.
 
-## Main Files
-
-### `isochrone.html`
-Flight isochrone visualization showing multimodal travel times on a 3D globe.
+## Main File: `isochrone.html`
 
 **Tech Stack:**
 - MapLibre GL JS v5.0.0 (globe projection)
@@ -20,13 +24,7 @@ Flight isochrone visualization showing multimodal travel times on a 3D globe.
 - Dynamic resolution based on zoom level
 - Interactive tooltips with routing breakdown
 
-**Running locally:**
-```bash
-python -m http.server 8765
-# Open http://localhost:8765/isochrone.html
-```
-
-### Other Visualizations
+## Other Files (legacy)
 - `index.html` - Warped map visualizations
 - `panels.html` - 9-panel comparison view
 - `lhostis.html` - 3D shrivelled USA map
