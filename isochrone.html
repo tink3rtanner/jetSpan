@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flight Isochrone Map</title>
+
+  <!-- MapLibre GL JS v5+ for globe support -->
+  <script src="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.css" rel="stylesheet" />
+
+  <!-- H3 for hexagonal grid -->
+  <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #fff;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Control panel */
+    .control-panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(10, 10, 10, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 16px;
+      z-index: 100;
+      min-width: 280px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .control-panel h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .control-panel .subtitle {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 16px;
+    }
+
+    .control-group {
+      margin-bottom: 16px;
+    }
+
+    .control-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #888;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .control-group select {
+      width: 100%;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .control-group select:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .toggle-row:last-child {
+      border-bottom: none;
+    }
+
+    .toggle-row span {
+      font-size: 14px;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 22px;
+      transition: 0.3s;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: #22c55e;
+    }
+
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(18px);
+    }
+
+    /* Legend */
+    .legend {
+      position: absolute;
+      bottom: 32px;
+      left: 16px;
+      background: rgba(10, 10, 10, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 16px;
+      z-index: 100;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .legend h3 {
+      font-size: 12px;
+      font-weight: 500;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .legend-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .legend-color {
+      width: 24px;
+      height: 16px;
+      border-radius: 4px;
+    }
+
+    /* Tooltip */
+    .tooltip {
+      position: absolute;
+      bottom: 32px;
+      right: 16px;
+      background: rgba(10, 10, 10, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 16px;
+      z-index: 100;
+      min-width: 280px;
+      max-width: 320px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      display: none;
+    }
+
+    .tooltip.visible {
+      display: block;
+    }
+
+    .tooltip-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .tooltip-location {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .tooltip-time {
+      font-size: 20px;
+      font-weight: 700;
+      color: #22c55e;
+    }
+
+    .tooltip-breakdown {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .breakdown-row:last-child {
+      border-bottom: none;
+    }
+
+    .breakdown-row .label {
+      color: #888;
+    }
+
+    .breakdown-row .value {
+      font-weight: 500;
+    }
+
+    .breakdown-row.route {
+      color: #666;
+      font-size: 11px;
+      padding: 4px 0;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 10, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    .loading-overlay.hidden {
+      display: none;
+    }
+
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #22c55e;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      margin-top: 16px;
+      font-size: 14px;
+      color: #888;
+    }
+
+    /* Stats bar */
+    .stats-bar {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(10, 10, 10, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 12px 16px;
+      z-index: 100;
+      display: flex;
+      gap: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Control Panel -->
+  <div class="control-panel">
+    <h1>Flight Isochrone Map</h1>
+    <p class="subtitle">Multimodal travel times from your origin</p>
+
+    <div class="control-group">
+      <label>Origin</label>
+      <select id="origin-select">
+        <option value="bristol">Bristol, UK</option>
+        <option value="london">London, UK</option>
+        <option value="newyork">New York, USA</option>
+        <option value="paris">Paris, France</option>
+        <option value="tokyo">Tokyo, Japan</option>
+        <option value="sydney">Sydney, Australia</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Display Options</label>
+      <div class="toggle-row">
+        <span>Show airports</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-airports" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span>Show hex grid</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-grid" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <h3>Travel Time</h3>
+    <div class="legend-item"><div class="legend-color" style="background: #22c55e;"></div> < 2 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #84cc16;"></div> 2-4 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #eab308;"></div> 4-6 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #f97316;"></div> 6-8 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div> 8-10 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #dc2626;"></div> 10-12 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #991b1b;"></div> 12-14 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #450a0a;"></div> 14+ hours</div>
+  </div>
+
+  <!-- Tooltip -->
+  <div class="tooltip" id="tooltip">
+    <div class="tooltip-header">
+      <div class="tooltip-location" id="tooltip-location">Paris, France</div>
+      <div class="tooltip-time" id="tooltip-time">3h 45m</div>
+    </div>
+    <div class="tooltip-breakdown">
+      <div class="breakdown-row route" id="tooltip-route">
+        <span>Bristol → LHR → CDG → Paris</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="label">Ground to airport</span>
+        <span class="value" id="tooltip-ground-to">2h 00m</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="label">Airport overhead</span>
+        <span class="value" id="tooltip-overhead">1h 30m</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="label">Flight time</span>
+        <span class="value" id="tooltip-flight">1h 15m</span>
+      </div>
+      <div class="breakdown-row">
+        <span class="label">Arrival + ground</span>
+        <span class="value" id="tooltip-ground-from">1h 00m</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="stats-bar">
+    <div class="stat">
+      <div class="stat-value" id="stat-cells">0</div>
+      <div class="stat-label">Cells</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="stat-airports">0</div>
+      <div class="stat-label">Airports</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="stat-routes">0</div>
+      <div class="stat-label">Routes</div>
+    </div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Calculating travel times...</div>
+  </div>
+
+<script>
+// =============================================================================
+// DATA: Origins
+// =============================================================================
+const ORIGINS = {
+  bristol: {
+    name: 'Bristol, UK',
+    coordinates: [-2.587, 51.454],
+    nearestAirport: { code: 'BRS', name: 'Bristol Airport', coordinates: [-2.719, 51.382], groundTimeMinutes: 25 },
+    alternativeAirports: [
+      { code: 'LHR', name: 'London Heathrow', coordinates: [-0.461, 51.470], groundTimeMinutes: 120 },
+      { code: 'LGW', name: 'London Gatwick', coordinates: [-0.190, 51.148], groundTimeMinutes: 150 },
+      { code: 'BHX', name: 'Birmingham', coordinates: [-1.748, 52.454], groundTimeMinutes: 90 },
+    ]
+  },
+  london: {
+    name: 'London, UK',
+    coordinates: [-0.118, 51.509],
+    nearestAirport: { code: 'LHR', name: 'London Heathrow', coordinates: [-0.461, 51.470], groundTimeMinutes: 45 },
+    alternativeAirports: [
+      { code: 'LGW', name: 'London Gatwick', coordinates: [-0.190, 51.148], groundTimeMinutes: 60 },
+      { code: 'STN', name: 'London Stansted', coordinates: [0.235, 51.885], groundTimeMinutes: 75 },
+      { code: 'LTN', name: 'London Luton', coordinates: [-0.368, 51.875], groundTimeMinutes: 60 },
+    ]
+  },
+  newyork: {
+    name: 'New York, USA',
+    coordinates: [-74.006, 40.713],
+    nearestAirport: { code: 'JFK', name: 'JFK International', coordinates: [-73.778, 40.640], groundTimeMinutes: 45 },
+    alternativeAirports: [
+      { code: 'EWR', name: 'Newark Liberty', coordinates: [-74.169, 40.690], groundTimeMinutes: 40 },
+      { code: 'LGA', name: 'LaGuardia', coordinates: [-73.872, 40.777], groundTimeMinutes: 35 },
+    ]
+  },
+  paris: {
+    name: 'Paris, France',
+    coordinates: [2.352, 48.857],
+    nearestAirport: { code: 'CDG', name: 'Paris Charles de Gaulle', coordinates: [2.548, 49.010], groundTimeMinutes: 45 },
+    alternativeAirports: [
+      { code: 'ORY', name: 'Paris Orly', coordinates: [2.365, 48.726], groundTimeMinutes: 35 },
+    ]
+  },
+  tokyo: {
+    name: 'Tokyo, Japan',
+    coordinates: [139.692, 35.690],
+    nearestAirport: { code: 'NRT', name: 'Narita International', coordinates: [140.386, 35.765], groundTimeMinutes: 75 },
+    alternativeAirports: [
+      { code: 'HND', name: 'Tokyo Haneda', coordinates: [139.779, 35.553], groundTimeMinutes: 45 },
+    ]
+  },
+  sydney: {
+    name: 'Sydney, Australia',
+    coordinates: [151.209, -33.868],
+    nearestAirport: { code: 'SYD', name: 'Sydney Kingsford Smith', coordinates: [151.177, -33.947], groundTimeMinutes: 30 },
+    alternativeAirports: []
+  }
+};
+
+// =============================================================================
+// DATA: Airports (world major airports)
+// =============================================================================
+const AIRPORTS = [
+  // UK
+  { code: 'LHR', name: 'London Heathrow', coordinates: [-0.461, 51.470], country: 'UK' },
+  { code: 'LGW', name: 'London Gatwick', coordinates: [-0.190, 51.148], country: 'UK' },
+  { code: 'BRS', name: 'Bristol', coordinates: [-2.719, 51.382], country: 'UK' },
+  { code: 'BHX', name: 'Birmingham', coordinates: [-1.748, 52.454], country: 'UK' },
+  { code: 'MAN', name: 'Manchester', coordinates: [-2.275, 53.354], country: 'UK' },
+  { code: 'EDI', name: 'Edinburgh', coordinates: [-3.373, 55.950], country: 'UK' },
+  { code: 'GLA', name: 'Glasgow', coordinates: [-4.433, 55.872], country: 'UK' },
+  { code: 'STN', name: 'London Stansted', coordinates: [0.235, 51.885], country: 'UK' },
+  { code: 'LTN', name: 'London Luton', coordinates: [-0.368, 51.875], country: 'UK' },
+
+  // Europe
+  { code: 'CDG', name: 'Paris Charles de Gaulle', coordinates: [2.548, 49.010], country: 'France' },
+  { code: 'ORY', name: 'Paris Orly', coordinates: [2.365, 48.726], country: 'France' },
+  { code: 'AMS', name: 'Amsterdam Schiphol', coordinates: [4.764, 52.309], country: 'Netherlands' },
+  { code: 'FRA', name: 'Frankfurt', coordinates: [8.571, 50.033], country: 'Germany' },
+  { code: 'MUC', name: 'Munich', coordinates: [11.790, 48.354], country: 'Germany' },
+  { code: 'MAD', name: 'Madrid Barajas', coordinates: [-3.567, 40.472], country: 'Spain' },
+  { code: 'BCN', name: 'Barcelona El Prat', coordinates: [2.078, 41.297], country: 'Spain' },
+  { code: 'FCO', name: 'Rome Fiumicino', coordinates: [12.251, 41.804], country: 'Italy' },
+  { code: 'MXP', name: 'Milan Malpensa', coordinates: [8.728, 45.630], country: 'Italy' },
+  { code: 'ZRH', name: 'Zurich', coordinates: [8.549, 47.464], country: 'Switzerland' },
+  { code: 'GVA', name: 'Geneva', coordinates: [6.109, 46.238], country: 'Switzerland' },
+  { code: 'VIE', name: 'Vienna', coordinates: [16.570, 48.110], country: 'Austria' },
+  { code: 'BRU', name: 'Brussels', coordinates: [4.484, 50.901], country: 'Belgium' },
+  { code: 'DUB', name: 'Dublin', coordinates: [-6.270, 53.421], country: 'Ireland' },
+  { code: 'LIS', name: 'Lisbon', coordinates: [-9.136, 38.775], country: 'Portugal' },
+  { code: 'ATH', name: 'Athens', coordinates: [23.944, 37.936], country: 'Greece' },
+  { code: 'CPH', name: 'Copenhagen', coordinates: [12.656, 55.618], country: 'Denmark' },
+  { code: 'OSL', name: 'Oslo', coordinates: [11.100, 60.121], country: 'Norway' },
+  { code: 'ARN', name: 'Stockholm Arlanda', coordinates: [17.918, 59.652], country: 'Sweden' },
+  { code: 'HEL', name: 'Helsinki', coordinates: [24.963, 60.317], country: 'Finland' },
+  { code: 'WAW', name: 'Warsaw', coordinates: [20.967, 52.166], country: 'Poland' },
+  { code: 'PRG', name: 'Prague', coordinates: [14.264, 50.101], country: 'Czech Republic' },
+  { code: 'BUD', name: 'Budapest', coordinates: [19.261, 47.439], country: 'Hungary' },
+  { code: 'IST', name: 'Istanbul', coordinates: [28.814, 41.261], country: 'Turkey' },
+
+  // Middle East
+  { code: 'DXB', name: 'Dubai', coordinates: [55.365, 25.253], country: 'UAE' },
+  { code: 'DOH', name: 'Doha', coordinates: [51.608, 25.273], country: 'Qatar' },
+  { code: 'AUH', name: 'Abu Dhabi', coordinates: [54.651, 24.433], country: 'UAE' },
+  { code: 'TLV', name: 'Tel Aviv Ben Gurion', coordinates: [34.885, 32.009], country: 'Israel' },
+  { code: 'CAI', name: 'Cairo', coordinates: [31.406, 30.111], country: 'Egypt' },
+
+  // Asia
+  { code: 'SIN', name: 'Singapore Changi', coordinates: [103.989, 1.350], country: 'Singapore' },
+  { code: 'HKG', name: 'Hong Kong', coordinates: [113.915, 22.309], country: 'Hong Kong' },
+  { code: 'NRT', name: 'Tokyo Narita', coordinates: [140.386, 35.765], country: 'Japan' },
+  { code: 'HND', name: 'Tokyo Haneda', coordinates: [139.779, 35.553], country: 'Japan' },
+  { code: 'ICN', name: 'Seoul Incheon', coordinates: [126.451, 37.460], country: 'South Korea' },
+  { code: 'PEK', name: 'Beijing Capital', coordinates: [116.584, 40.080], country: 'China' },
+  { code: 'PVG', name: 'Shanghai Pudong', coordinates: [121.805, 31.143], country: 'China' },
+  { code: 'BKK', name: 'Bangkok Suvarnabhumi', coordinates: [100.747, 13.681], country: 'Thailand' },
+  { code: 'KUL', name: 'Kuala Lumpur', coordinates: [101.700, 2.746], country: 'Malaysia' },
+  { code: 'DEL', name: 'Delhi Indira Gandhi', coordinates: [77.103, 28.556], country: 'India' },
+  { code: 'BOM', name: 'Mumbai', coordinates: [72.868, 19.089], country: 'India' },
+
+  // North America
+  { code: 'JFK', name: 'New York JFK', coordinates: [-73.778, 40.640], country: 'USA' },
+  { code: 'EWR', name: 'Newark', coordinates: [-74.169, 40.690], country: 'USA' },
+  { code: 'LGA', name: 'LaGuardia', coordinates: [-73.872, 40.777], country: 'USA' },
+  { code: 'LAX', name: 'Los Angeles', coordinates: [-118.408, 33.942], country: 'USA' },
+  { code: 'SFO', name: 'San Francisco', coordinates: [-122.375, 37.619], country: 'USA' },
+  { code: 'ORD', name: 'Chicago O\'Hare', coordinates: [-87.905, 41.978], country: 'USA' },
+  { code: 'DFW', name: 'Dallas Fort Worth', coordinates: [-97.038, 32.897], country: 'USA' },
+  { code: 'MIA', name: 'Miami', coordinates: [-80.291, 25.795], country: 'USA' },
+  { code: 'ATL', name: 'Atlanta', coordinates: [-84.428, 33.641], country: 'USA' },
+  { code: 'SEA', name: 'Seattle', coordinates: [-122.309, 47.449], country: 'USA' },
+  { code: 'BOS', name: 'Boston', coordinates: [-71.005, 42.365], country: 'USA' },
+  { code: 'DEN', name: 'Denver', coordinates: [-104.673, 39.862], country: 'USA' },
+  { code: 'YYZ', name: 'Toronto Pearson', coordinates: [-79.631, 43.677], country: 'Canada' },
+  { code: 'YVR', name: 'Vancouver', coordinates: [-123.184, 49.195], country: 'Canada' },
+  { code: 'YUL', name: 'Montreal', coordinates: [-73.741, 45.470], country: 'Canada' },
+  { code: 'MEX', name: 'Mexico City', coordinates: [-99.072, 19.436], country: 'Mexico' },
+
+  // South America
+  { code: 'GRU', name: 'São Paulo Guarulhos', coordinates: [-46.473, -23.431], country: 'Brazil' },
+  { code: 'EZE', name: 'Buenos Aires Ezeiza', coordinates: [-58.535, -34.822], country: 'Argentina' },
+  { code: 'SCL', name: 'Santiago', coordinates: [-70.786, -33.393], country: 'Chile' },
+  { code: 'BOG', name: 'Bogotá', coordinates: [-74.147, 4.702], country: 'Colombia' },
+  { code: 'LIM', name: 'Lima', coordinates: [-77.114, -12.022], country: 'Peru' },
+
+  // Africa
+  { code: 'JNB', name: 'Johannesburg', coordinates: [28.231, -26.134], country: 'South Africa' },
+  { code: 'CPT', name: 'Cape Town', coordinates: [18.602, -33.969], country: 'South Africa' },
+  { code: 'NBO', name: 'Nairobi', coordinates: [36.928, -1.319], country: 'Kenya' },
+  { code: 'ADD', name: 'Addis Ababa', coordinates: [38.799, 8.978], country: 'Ethiopia' },
+  { code: 'LOS', name: 'Lagos', coordinates: [3.321, 6.577], country: 'Nigeria' },
+  { code: 'CMN', name: 'Casablanca', coordinates: [-7.590, 33.367], country: 'Morocco' },
+
+  // Oceania
+  { code: 'SYD', name: 'Sydney', coordinates: [151.177, -33.947], country: 'Australia' },
+  { code: 'MEL', name: 'Melbourne', coordinates: [144.843, -37.673], country: 'Australia' },
+  { code: 'BNE', name: 'Brisbane', coordinates: [153.117, -27.384], country: 'Australia' },
+  { code: 'PER', name: 'Perth', coordinates: [115.967, -31.940], country: 'Australia' },
+  { code: 'AKL', name: 'Auckland', coordinates: [174.792, -37.008], country: 'New Zealand' },
+];
+
+// =============================================================================
+// DATA: Flight times (minutes) - major routes
+// =============================================================================
+const FLIGHT_TIMES = {
+  // From London Heathrow
+  'LHR': {
+    // Europe
+    'CDG': 75, 'ORY': 80, 'AMS': 75, 'FRA': 95, 'MUC': 115,
+    'MAD': 155, 'BCN': 120, 'FCO': 150, 'MXP': 115, 'ZRH': 100,
+    'GVA': 95, 'VIE': 140, 'BRU': 65, 'DUB': 80, 'LIS': 165,
+    'ATH': 230, 'CPH': 110, 'OSL': 120, 'ARN': 145, 'HEL': 180,
+    'WAW': 160, 'PRG': 120, 'BUD': 155, 'IST': 240,
+    // Middle East
+    'DXB': 420, 'DOH': 400, 'AUH': 430, 'TLV': 290, 'CAI': 300,
+    // Asia
+    'SIN': 780, 'HKG': 720, 'NRT': 720, 'HND': 730, 'ICN': 690,
+    'PEK': 600, 'PVG': 720, 'BKK': 690, 'KUL': 780, 'DEL': 510, 'BOM': 540,
+    // North America
+    'JFK': 480, 'EWR': 485, 'LAX': 660, 'SFO': 660, 'ORD': 540,
+    'DFW': 600, 'MIA': 570, 'ATL': 570, 'SEA': 600, 'BOS': 450,
+    'DEN': 600, 'YYZ': 480, 'YVR': 600, 'YUL': 420,
+    // South America
+    'GRU': 720, 'EZE': 840, 'SCL': 900, 'BOG': 660, 'LIM': 780,
+    // Africa
+    'JNB': 660, 'CPT': 720, 'NBO': 510, 'ADD': 480, 'LOS': 390, 'CMN': 210,
+    // Oceania
+    'SYD': 1320, 'MEL': 1350, 'BNE': 1380, 'PER': 1080, 'AKL': 1500,
+    // UK domestic
+    'EDI': 80, 'GLA': 85, 'MAN': 55, 'BRS': 45, 'BHX': 50,
+  },
+
+  // From Bristol (regional + some long haul via codeshare)
+  'BRS': {
+    'DUB': 60, 'EDI': 75, 'GLA': 80,
+    'AMS': 85, 'CDG': 95, 'BRU': 80,
+    'MAD': 165, 'BCN': 135, 'LIS': 175,
+    'FAO': 180, 'AGP': 170, 'PMI': 150,
+    'NCE': 125, 'GVA': 110, 'ZRH': 110,
+    'FRA': 100, 'MUC': 120, 'VIE': 140,
+    'CPH': 115, 'ARN': 150,
+    'JFK': 510, // seasonal direct
+  },
+
+  // From London Gatwick
+  'LGW': {
+    'JFK': 490, 'MCO': 540, 'LAX': 680,
+    'BCN': 120, 'PMI': 135, 'TFS': 270,
+    'AGP': 170, 'FAO': 175, 'LIS': 165,
+    'CDG': 80, 'AMS': 80, 'GVA': 100,
+    'DUB': 85, 'EDI': 90,
+  },
+
+  // From Manchester
+  'MAN': {
+    'JFK': 480, 'LAX': 660, 'ATL': 540,
+    'DXB': 450, 'SIN': 810,
+    'CDG': 90, 'AMS': 80, 'FRA': 100,
+    'BCN': 135, 'MAD': 155,
+    'DUB': 55, 'EDI': 55,
+  },
+
+  // From JFK
+  'JFK': {
+    'LHR': 420, 'LGW': 430, 'CDG': 450, 'AMS': 460, 'FRA': 490,
+    'MAD': 480, 'FCO': 540, 'DUB': 390, 'MUC': 540,
+    'LAX': 330, 'SFO': 360, 'ORD': 150, 'MIA': 180, 'ATL': 140,
+    'DFW': 210, 'DEN': 240, 'SEA': 330, 'BOS': 75,
+    'YYZ': 90, 'YVR': 330, 'YUL': 85, 'MEX': 300,
+    'GRU': 600, 'EZE': 660,
+    'NRT': 840, 'HKG': 960, 'SIN': 1080,
+    'DXB': 780, 'DOH': 780,
+  },
+
+  // From CDG (Paris)
+  'CDG': {
+    'LHR': 75, 'AMS': 70, 'FRA': 70, 'MAD': 120, 'BCN': 95,
+    'FCO': 120, 'MXP': 85, 'ZRH': 75, 'GVA': 70, 'BRU': 55,
+    'VIE': 120, 'PRG': 100, 'WAW': 140, 'BUD': 130,
+    'JFK': 480, 'LAX': 720, 'YYZ': 480,
+    'DXB': 390, 'DOH': 390,
+    'NRT': 720, 'HKG': 720, 'SIN': 780, 'BKK': 660,
+    'JNB': 660,
+  },
+
+  // From Dubai
+  'DXB': {
+    'LHR': 420, 'CDG': 390, 'FRA': 360, 'AMS': 420,
+    'JFK': 840, 'LAX': 960,
+    'SIN': 420, 'HKG': 480, 'BKK': 360, 'DEL': 210, 'BOM': 180,
+    'NRT': 660, 'ICN': 540,
+    'SYD': 840, 'MEL': 870,
+    'JNB': 480, 'NBO': 300,
+  },
+
+  // From Singapore
+  'SIN': {
+    'LHR': 780, 'CDG': 780, 'FRA': 750,
+    'JFK': 1140, 'LAX': 1020, 'SFO': 1020,
+    'DXB': 420, 'DOH': 480,
+    'HKG': 240, 'NRT': 420, 'ICN': 360, 'PEK': 360, 'PVG': 300,
+    'BKK': 150, 'KUL': 60, 'DEL': 330, 'BOM': 330,
+    'SYD': 480, 'MEL': 480, 'PER': 300, 'AKL': 600,
+  },
+
+  // From Sydney
+  'SYD': {
+    'LHR': 1320, 'DXB': 840, 'SIN': 480, 'HKG': 540, 'NRT': 600,
+    'LAX': 840, 'SFO': 840,
+    'AKL': 210, 'MEL': 90, 'BNE': 90, 'PER': 300,
+  },
+
+  // From Tokyo Narita/Haneda
+  'NRT': {
+    'LHR': 720, 'CDG': 720, 'FRA': 720,
+    'JFK': 780, 'LAX': 660, 'SFO': 600, 'ORD': 720,
+    'SIN': 420, 'HKG': 300, 'ICN': 150, 'PEK': 210, 'PVG': 180,
+    'BKK': 360, 'DEL': 540,
+    'SYD': 600, 'AKL': 660,
+    'DXB': 660, 'DOH': 720,
+  },
+
+  'HND': {
+    'LHR': 730, 'CDG': 730, 'FRA': 730,
+    'JFK': 800, 'LAX': 680, 'SFO': 620,
+    'SIN': 430, 'HKG': 280, 'ICN': 150, 'PEK': 220, 'PVG': 190,
+    'SYD': 600,
+  },
+
+  // From Hong Kong
+  'HKG': {
+    'LHR': 720, 'CDG': 720, 'FRA': 720, 'AMS': 720,
+    'JFK': 960, 'LAX': 780, 'SFO': 750, 'YVR': 660,
+    'SIN': 240, 'BKK': 180, 'NRT': 300, 'ICN': 210, 'PEK': 210, 'PVG': 150,
+    'DEL': 360, 'BOM': 360,
+    'SYD': 540, 'MEL': 570,
+    'DXB': 480, 'DOH': 540,
+  },
+
+  // From Frankfurt (major European hub)
+  'FRA': {
+    'LHR': 95, 'CDG': 70, 'AMS': 70, 'ZRH': 55, 'VIE': 80, 'MUC': 50,
+    'MAD': 155, 'BCN': 120, 'FCO': 110, 'ATH': 180, 'IST': 180,
+    'JFK': 540, 'LAX': 720, 'ORD': 600, 'YYZ': 540,
+    'DXB': 360, 'DOH': 360, 'TLV': 240,
+    'SIN': 720, 'HKG': 660, 'NRT': 720, 'ICN': 660, 'PEK': 600, 'DEL': 480,
+    'JNB': 660, 'CPT': 720,
+    'GRU': 720, 'EZE': 840,
+  },
+
+  // From Amsterdam (major hub)
+  'AMS': {
+    'LHR': 75, 'CDG': 70, 'FRA': 70, 'ZRH': 85, 'MUC': 85,
+    'MAD': 150, 'BCN': 120, 'FCO': 140, 'ATH': 195,
+    'JFK': 480, 'LAX': 660, 'SFO': 660, 'ORD': 540, 'YYZ': 480,
+    'DXB': 390, 'DOH': 390,
+    'SIN': 750, 'HKG': 690, 'NRT': 690, 'ICN': 660, 'PEK': 600,
+    'JNB': 660, 'CPT': 720,
+  },
+
+  // From Los Angeles
+  'LAX': {
+    'LHR': 660, 'CDG': 720, 'FRA': 720, 'AMS': 660,
+    'JFK': 330, 'SFO': 90, 'ORD': 240, 'DFW': 180, 'DEN': 150, 'SEA': 150,
+    'MIA': 300, 'ATL': 270, 'BOS': 330,
+    'YYZ': 300, 'YVR': 180, 'MEX': 210,
+    'NRT': 660, 'HKG': 780, 'SIN': 1020, 'ICN': 720, 'PEK': 780,
+    'SYD': 840, 'AKL': 780,
+    'DXB': 960,
+  },
+};
+
+// =============================================================================
+// TIME BANDS (Galton-style colors)
+// =============================================================================
+const TIME_BANDS = [
+  { maxHours: 2, color: '#22c55e', label: '< 2h' },
+  { maxHours: 4, color: '#84cc16', label: '2-4h' },
+  { maxHours: 6, color: '#eab308', label: '4-6h' },
+  { maxHours: 8, color: '#f97316', label: '6-8h' },
+  { maxHours: 10, color: '#ef4444', label: '8-10h' },
+  { maxHours: 12, color: '#dc2626', label: '10-12h' },
+  { maxHours: 14, color: '#991b1b', label: '12-14h' },
+  { maxHours: Infinity, color: '#450a0a', label: '14h+' },
+];
+
+// =============================================================================
+// UTILITIES
+// =============================================================================
+
+function haversineDistance(coord1, coord2) {
+  const R = 6371; // Earth radius in km
+  const lat1 = coord1[1] * Math.PI / 180;
+  const lat2 = coord2[1] * Math.PI / 180;
+  const dLat = (coord2[1] - coord1[1]) * Math.PI / 180;
+  const dLng = (coord2[0] - coord1[0]) * Math.PI / 180;
+
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1) * Math.cos(lat2) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+  return R * c;
+}
+
+function estimateGroundTime(fromCoords, toCoords) {
+  const distanceKm = haversineDistance(fromCoords, toCoords);
+  // Average suburban speed ~40 km/h
+  return Math.round((distanceKm / 40) * 60);
+}
+
+function getFlightTime(fromCode, toCode) {
+  // Check direct routes
+  if (FLIGHT_TIMES[fromCode]?.[toCode]) {
+    return FLIGHT_TIMES[fromCode][toCode];
+  }
+  if (FLIGHT_TIMES[toCode]?.[fromCode]) {
+    return FLIGHT_TIMES[toCode][fromCode];
+  }
+  return null;
+}
+
+function estimateFlightFromDistance(fromCoords, toCoords) {
+  const distanceKm = haversineDistance(fromCoords, toCoords);
+  const isShortHaul = distanceKm < 1500;
+  const effectiveSpeed = isShortHaul ? 600 : 800;
+  const flightMin = (distanceKm / effectiveSpeed) * 60;
+  const fixedOverhead = 25;
+  return Math.round(flightMin + fixedOverhead);
+}
+
+function formatTime(minutes) {
+  if (minutes >= 1440) {
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor((minutes % 1440) / 60);
+    return `${days}d ${hours}h`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins}m`;
+  return `${hours}h ${mins.toString().padStart(2, '0')}m`;
+}
+
+function getTimeBandColor(totalMinutes) {
+  const hours = totalMinutes / 60;
+  for (const band of TIME_BANDS) {
+    if (hours < band.maxHours) {
+      return band.color;
+    }
+  }
+  return TIME_BANDS[TIME_BANDS.length - 1].color;
+}
+
+// =============================================================================
+// TRAVEL TIME CALCULATION
+// =============================================================================
+
+function findNearestAirport(coords) {
+  let nearest = null;
+  let minDist = Infinity;
+
+  for (const airport of AIRPORTS) {
+    const dist = haversineDistance(coords, airport.coordinates);
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = airport;
+    }
+  }
+
+  return { airport: nearest, distance: minDist };
+}
+
+function findNearestAirports(coords, count = 10) {
+  // Find the N nearest airports to given coordinates
+  const airportsWithDist = AIRPORTS.map(airport => ({
+    airport,
+    distance: haversineDistance(coords, airport.coordinates)
+  }));
+
+  airportsWithDist.sort((a, b) => a.distance - b.distance);
+
+  return airportsWithDist.slice(0, count);
+}
+
+function calculateTotalTravelTime(origin, destCoords) {
+  // If very close to origin (< 50km), just use ground transport
+  const distFromOrigin = haversineDistance(origin.coordinates, destCoords);
+  if (distFromOrigin < 50) {
+    return {
+      totalMinutes: estimateGroundTime(origin.coordinates, destCoords),
+      breakdown: {
+        groundTo: 0,
+        overhead: 0,
+        flight: 0,
+        arrival: 0,
+        groundFrom: estimateGroundTime(origin.coordinates, destCoords),
+      },
+      route: {
+        originAirport: null,
+        destAirport: null,
+        isDirect: true,
+      }
+    };
+  }
+
+  // Find top N nearest airports to destination (try multiple to find best route)
+  const nearestDestAirports = findNearestAirports(destCoords, 10);
+  const allOriginAirports = [origin.nearestAirport, ...origin.alternativeAirports];
+
+  let bestResult = null;
+  let bestTime = Infinity;
+
+  // Try all combinations of origin airports and destination airports
+  for (const originAirport of allOriginAirports) {
+    for (const { airport: destAirport, distance: destAirportDist } of nearestDestAirports) {
+      // Ground: origin → airport
+      const groundTo = originAirport.groundTimeMinutes;
+
+      // Airport overhead (security, boarding)
+      const airportOverhead = 90;
+
+      // Flight time
+      let flight = getFlightTime(originAirport.code, destAirport.code);
+
+      // If no direct flight, estimate based on distance
+      if (flight === null) {
+        const originAirportData = AIRPORTS.find(a => a.code === originAirport.code);
+        if (originAirportData) {
+          flight = estimateFlightFromDistance(originAirportData.coordinates, destAirport.coordinates);
+        } else {
+          continue;
+        }
+      }
+
+      // Arrival overhead (deplane, customs if intl)
+      const isInternational = origin.nearestAirport.code.substring(0, 2) !== destAirport.code.substring(0, 2);
+      const arrivalOverhead = isInternational ? 60 : 30;
+
+      // Ground: destination airport → destination
+      const groundFrom = Math.round((destAirportDist / 40) * 60);
+
+      const total = groundTo + airportOverhead + flight + arrivalOverhead + groundFrom;
+
+      if (total < bestTime) {
+        bestTime = total;
+        bestResult = {
+          totalMinutes: total,
+          breakdown: {
+            groundTo,
+            overhead: airportOverhead,
+            flight,
+            arrival: arrivalOverhead,
+            groundFrom,
+          },
+          route: {
+            originAirport: originAirport.code,
+            destAirport: destAirport.code,
+            isDirect: false,
+          }
+        };
+      }
+    }
+  }
+
+  return bestResult;
+}
+
+// =============================================================================
+// H3 GRID GENERATION
+// =============================================================================
+
+function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
+  const features = [];
+
+  // Resolution guide:
+  // Resolution 2 = ~86,000 km² per cell (very coarse, fast)
+  // Resolution 3 = ~12,000 km² per cell (good for global view)
+  // Resolution 4 = ~1,700 km² per cell (better detail)
+  // Resolution 5 = ~252 km² per cell (high detail, slower)
+
+  // Use viewport bounds if provided, otherwise full world
+  const bounds = viewportBounds || {
+    north: 75,
+    south: -55,
+    east: 180,
+    west: -180,
+  };
+
+  // Add padding to bounds to avoid edge artifacts (10% padding)
+  const latPadding = (bounds.north - bounds.south) * 0.1;
+  const lngPadding = (bounds.east - bounds.west) * 0.1;
+  const paddedBounds = {
+    north: Math.min(85, bounds.north + latPadding),
+    south: Math.max(-85, bounds.south - latPadding),
+    east: Math.min(180, bounds.east + lngPadding),
+    west: Math.max(-180, bounds.west - lngPadding),
+  };
+
+  // Sampling density based on resolution
+  // Step should be smaller than cell size to ensure complete coverage
+  // H3 cell sizes: res2 ~500km, res3 ~180km, res4 ~70km, res5 ~25km, res6 ~10km
+  const stepMap = { 2: 1.2, 3: 0.45, 4: 0.12, 5: 0.035, 6: 0.01 };
+  const step = stepMap[resolution] || 0.12;
+
+  const seenCells = new Set();
+
+  for (let lat = paddedBounds.south; lat <= paddedBounds.north; lat += step) {
+    for (let lng = paddedBounds.west; lng <= paddedBounds.east; lng += step) {
+      try {
+        const h3Index = h3.latLngToCell(lat, lng, resolution);
+
+        if (seenCells.has(h3Index)) continue;
+        seenCells.add(h3Index);
+
+        const boundary = h3.cellToBoundary(h3Index);
+        const centroid = h3.cellToLatLng(h3Index);
+
+        // Calculate travel time
+        const result = calculateTotalTravelTime(origin, [centroid[1], centroid[0]]);
+
+        if (result) {
+          const color = getTimeBandColor(result.totalMinutes);
+
+          // Convert boundary to GeoJSON coordinates [lng, lat]
+          let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
+
+          // Check if cell crosses antimeridian (has both large positive and negative longitudes)
+          const lngs = coordinates.map(c => c[0]);
+          const hasPositive = lngs.some(lng => lng > 90);
+          const hasNegative = lngs.some(lng => lng < -90);
+
+          if (hasPositive && hasNegative) {
+            // Normalize: shift negative longitudes to positive side (>180)
+            // This keeps the polygon contiguous for rendering
+            coordinates = coordinates.map(([lng, lat]) => [
+              lng < 0 ? lng + 360 : lng,
+              lat
+            ]);
+          }
+
+          coordinates.push(coordinates[0]); // Close the polygon
+
+          features.push({
+            type: 'Feature',
+            properties: {
+              h3Index,
+              travelTimeMinutes: result.totalMinutes,
+              color,
+              breakdown: result.breakdown,
+              route: result.route,
+              centroid: [centroid[1], centroid[0]],
+            },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [coordinates],
+            }
+          });
+        }
+      } catch (e) {
+        // Skip invalid cells
+      }
+    }
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
+// =============================================================================
+// MAP INITIALIZATION
+// =============================================================================
+
+let map;
+let currentOrigin = 'bristol';
+let gridData = null;
+let currentResolution = 3;
+let isUpdatingGrid = false;
+
+function getResolutionForZoom(zoom) {
+  // Finer resolutions since we only render viewport
+  if (zoom < 2) return 2;       // Globe view: res 2 (~86k km² cells)
+  if (zoom < 3.5) return 3;     // Continental: res 3 (~12k km² cells)
+  if (zoom < 5) return 4;       // Regional: res 4 (~1.7k km² cells)
+  if (zoom < 7) return 5;       // Local: res 5 (~252 km² cells)
+  return 6;                      // Street level: res 6 (~36 km² cells)
+}
+
+async function initMap() {
+  map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/positron',
+    center: ORIGINS[currentOrigin].coordinates,
+    zoom: 2,
+  });
+
+  // Enable globe projection after style loads (MapLibre v5+)
+  map.on('style.load', () => {
+    map.setProjection({ type: 'globe' });
+  });
+
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+
+  map.on('load', () => {
+    // Add sources
+    map.addSource('hexgrid', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+
+    map.addSource('airports', {
+      type: 'geojson',
+      data: generateAirportGeoJSON(),
+    });
+
+    map.addSource('origin', {
+      type: 'geojson',
+      data: generateOriginGeoJSON(),
+    });
+
+    // Add layers - order matters! Hex grid first, then airports on top
+    map.addLayer({
+      id: 'hexgrid-fill',
+      type: 'fill',
+      source: 'hexgrid',
+      paint: {
+        'fill-color': ['get', 'color'],
+        // Fade out very long travel times (mostly ocean/remote)
+        'fill-opacity': [
+          'interpolate', ['linear'],
+          ['get', 'travelTimeMinutes'],
+          0, 0.45,     // Near origin: semi-transparent
+          360, 0.4,    // 6 hours
+          600, 0.3,    // 10 hours
+          840, 0.2,    // 14 hours
+          1200, 0.1    // 20+ hours: very faint
+        ],
+      }
+    });
+
+    map.addLayer({
+      id: 'hexgrid-line',
+      type: 'line',
+      source: 'hexgrid',
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 0,      // No lines when zoomed out
+          3, 0,      // Still no lines
+          5, 0.3,    // Thin lines at medium zoom
+          8, 0.5     // Slightly thicker when zoomed in
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 0,
+          3, 0,
+          5, 0.1,
+          8, 0.15
+        ],
+      }
+    });
+
+    map.addLayer({
+      id: 'airports',
+      type: 'circle',
+      source: 'airports',
+      paint: {
+        'circle-radius': [
+          'interpolate', ['linear'], ['zoom'],
+          2, 3,
+          5, 5,
+          8, 8
+        ],
+        'circle-color': '#ffffff',
+        'circle-stroke-color': '#1a1a1a',
+        'circle-stroke-width': 2,
+      }
+    });
+
+    map.addLayer({
+      id: 'airport-labels',
+      type: 'symbol',
+      source: 'airports',
+      minzoom: 4,
+      layout: {
+        'text-field': ['get', 'code'],
+        'text-size': 11,
+        'text-offset': [0, 1.5],
+        'text-anchor': 'top',
+        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+      },
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': '#000000',
+        'text-halo-width': 1.5,
+      }
+    });
+
+    map.addLayer({
+      id: 'origin',
+      type: 'circle',
+      source: 'origin',
+      paint: {
+        'circle-radius': 12,
+        'circle-color': '#22c55e',
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 3,
+      }
+    });
+
+    // Add a pulsing effect layer for origin
+    map.addLayer({
+      id: 'origin-pulse',
+      type: 'circle',
+      source: 'origin',
+      paint: {
+        'circle-radius': 20,
+        'circle-color': '#22c55e',
+        'circle-opacity': 0.3,
+      }
+    }, 'origin');
+
+    // Add country borders on top of hex grid
+    // Use the existing OpenMapTiles vector source from the base style
+    map.addLayer({
+      id: 'country-borders',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'boundary',
+      filter: ['==', ['get', 'admin_level'], 2],
+      paint: {
+        'line-color': 'rgba(255, 255, 255, 0.6)',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          1, 0.5,
+          4, 1.5,
+          8, 2.5
+        ],
+      }
+    });
+
+    // Interaction
+    map.on('mousemove', 'hexgrid-fill', (e) => {
+      if (e.features.length > 0) {
+        showTooltip(e.features[0].properties);
+      }
+    });
+
+    map.on('mouseleave', 'hexgrid-fill', () => {
+      hideTooltip();
+    });
+
+    // Dynamic resolution and viewport-based rendering
+    let moveDebounceTimer = null;
+    map.on('moveend', () => {
+      const zoom = map.getZoom();
+      const newResolution = getResolutionForZoom(zoom);
+
+      // Regenerate grid when viewport changes (pan or zoom)
+      if (!isUpdatingGrid) {
+        clearTimeout(moveDebounceTimer);
+        moveDebounceTimer = setTimeout(() => {
+          currentResolution = newResolution;
+          updateGrid(newResolution, false); // Don't fly to origin
+        }, 200); // Shorter debounce for snappier feel
+      }
+    });
+
+    // Generate initial grid
+    updateGrid();
+  });
+}
+
+function generateAirportGeoJSON() {
+  return {
+    type: 'FeatureCollection',
+    features: AIRPORTS.map(airport => ({
+      type: 'Feature',
+      properties: {
+        code: airport.code,
+        name: airport.name,
+        country: airport.country,
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: airport.coordinates,
+      }
+    })),
+  };
+}
+
+function generateOriginGeoJSON() {
+  const origin = ORIGINS[currentOrigin];
+  return {
+    type: 'Feature',
+    properties: { name: origin.name },
+    geometry: {
+      type: 'Point',
+      coordinates: origin.coordinates,
+    }
+  };
+}
+
+function updateGrid(resolution = currentResolution, flyToOrigin = true) {
+  if (isUpdatingGrid) return;
+  isUpdatingGrid = true;
+
+  // Only show loading overlay for major changes (origin switch), not for pan/zoom
+  const showLoading = flyToOrigin;
+  if (showLoading) {
+    document.getElementById('loading').classList.remove('hidden');
+  }
+
+  // Use requestAnimationFrame for smoother updates
+  requestAnimationFrame(() => {
+    const origin = ORIGINS[currentOrigin];
+    currentResolution = resolution;
+
+    // Get viewport bounds for efficient rendering
+    // Note: getBounds() is unreliable in globe projection at low zoom
+    let viewportBounds = null;
+    const zoom = map ? map.getZoom() : 0;
+
+    if (map && map.getBounds && zoom >= 3) {
+      // Only use viewport bounds at higher zoom where projection is reliable
+      const bounds = map.getBounds();
+      const north = bounds.getNorth();
+      const south = bounds.getSouth();
+      const east = bounds.getEast();
+      const west = bounds.getWest();
+
+      // Validate bounds (avoid antimeridian wrap issues)
+      if (north > south && Math.abs(east - west) < 360) {
+        viewportBounds = { north, south, east, west };
+      }
+    }
+    // At low zoom (globe view), viewportBounds stays null = render full world
+
+    gridData = generateHexGrid(origin, resolution, viewportBounds);
+
+    map.getSource('hexgrid').setData(gridData);
+    map.getSource('origin').setData(generateOriginGeoJSON());
+
+    // Update stats
+    document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
+    document.getElementById('stat-airports').textContent = AIRPORTS.length;
+    document.getElementById('stat-routes').textContent = Object.values(FLIGHT_TIMES).reduce((sum, routes) => sum + Object.keys(routes).length, 0);
+
+    // Only fly to origin when origin changes, not on resolution change
+    if (flyToOrigin) {
+      map.flyTo({
+        center: origin.coordinates,
+        zoom: 4,
+        duration: 1000,
+      });
+    }
+
+    if (showLoading) {
+      document.getElementById('loading').classList.add('hidden');
+    }
+    isUpdatingGrid = false;
+  });
+}
+
+function showTooltip(properties) {
+  const tooltip = document.getElementById('tooltip');
+  const breakdown = JSON.parse(properties.breakdown);
+  const route = JSON.parse(properties.route);
+
+  // Find airport names
+  const destAirport = AIRPORTS.find(a => a.code === route.destAirport);
+  const locationName = destAirport ? `Near ${destAirport.name}` : 'Location';
+
+  document.getElementById('tooltip-location').textContent = locationName;
+  document.getElementById('tooltip-time').textContent = formatTime(properties.travelTimeMinutes);
+  document.getElementById('tooltip-time').style.color = properties.color;
+
+  if (route.isDirect) {
+    document.getElementById('tooltip-route').innerHTML = '<span>Direct ground transport</span>';
+  } else {
+    const originName = ORIGINS[currentOrigin].name.split(',')[0];
+    document.getElementById('tooltip-route').innerHTML =
+      `<span>${originName} → ${route.originAirport} ✈ ${route.destAirport}</span>`;
+  }
+
+  document.getElementById('tooltip-ground-to').textContent = formatTime(breakdown.groundTo);
+  document.getElementById('tooltip-overhead').textContent = formatTime(breakdown.overhead);
+  document.getElementById('tooltip-flight').textContent = formatTime(breakdown.flight);
+  document.getElementById('tooltip-ground-from').textContent = formatTime(breakdown.arrival + breakdown.groundFrom);
+
+  tooltip.classList.add('visible');
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('visible');
+}
+
+// =============================================================================
+// EVENT LISTENERS
+// =============================================================================
+
+document.getElementById('origin-select').addEventListener('change', (e) => {
+  currentOrigin = e.target.value;
+  updateGrid();
+});
+
+document.getElementById('toggle-airports').addEventListener('change', (e) => {
+  const visibility = e.target.checked ? 'visible' : 'none';
+  map.setLayoutProperty('airports', 'visibility', visibility);
+  map.setLayoutProperty('airport-labels', 'visibility', visibility);
+});
+
+document.getElementById('toggle-grid').addEventListener('change', (e) => {
+  const visibility = e.target.checked ? 'visible' : 'none';
+  map.setLayoutProperty('hexgrid-fill', 'visibility', visibility);
+  map.setLayoutProperty('hexgrid-line', 'visibility', visibility);
+});
+
+// Initialize
+initMap();
+</script>
+</body>
+</html>

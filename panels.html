@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Time-Space Visualizations</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fafafa;
+      color: #333;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      font-weight: 300;
+      margin-bottom: 6px;
+      color: #222;
+      font-size: 1.6rem;
+    }
+    .subtitle {
+      text-align: center;
+      color: #999;
+      margin-bottom: 25px;
+      font-size: 0.8rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      max-width: 1500px;
+      margin: 0 auto;
+    }
+    .panel {
+      background: #fff;
+      border-radius: 6px;
+      padding: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      min-height: 300px;
+    }
+    .panel h2 {
+      font-weight: 500;
+      font-size: 0.75rem;
+      color: #555;
+      margin-bottom: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .panel .desc {
+      font-size: 0.65rem;
+      color: #aaa;
+      margin-bottom: 8px;
+    }
+    .panel svg {
+      width: 100%;
+      height: 260px;
+    }
+    .land { fill: #eee; stroke: #ddd; stroke-width: 0.5; }
+    .land-wire { fill: none; stroke: #ccc; stroke-width: 0.5; }
+    .land-warped { fill: none; stroke: #aaa; stroke-width: 0.5; }
+    .city-dot { fill: #3498db; stroke: #fff; stroke-width: 1.5; }
+    .origin-marker { fill: #e74c3c; }
+    .origin-ring { fill: none; stroke: #e74c3c; stroke-width: 1; opacity: 0.3; }
+    .time-ring { fill: none; stroke: #e0e0e0; stroke-width: 1; }
+    .connector { stroke: #e0e0e0; stroke-width: 1; }
+    .label { font-size: 7px; fill: #999; }
+    .grid-line { fill: none; stroke: #ddd; stroke-width: 0.5; }
+    .drop-line { stroke: #ccc; stroke-width: 1; }
+    .tier-line { stroke: #eee; stroke-width: 1; stroke-dasharray: 3,3; }
+    .terrain-fill { fill: #e8e8e8; stroke: none; }
+    .terrain-line { fill: none; stroke: #999; stroke-width: 1.5; }
+    .axis-line { stroke: #ddd; stroke-width: 1; }
+    .axis-label { font-size: 8px; fill: #999; }
+  </style>
+</head>
+<body>
+  <h1>The Shrinking World from London</h1>
+  <p class="subtitle">Nine approaches to visualizing flight time vs geography</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>1. Geographic Baseline</h2>
+      <p class="desc">Standard map for reference</p>
+      <svg id="svg1"></svg>
+    </div>
+    <div class="panel">
+      <h2>2. Radial Time-Space</h2>
+      <p class="desc">Direction preserved, distance = hours</p>
+      <svg id="svg2"></svg>
+    </div>
+    <div class="panel">
+      <h2>3. Warped Coastlines</h2>
+      <p class="desc">Geography distorted by travel time</p>
+      <svg id="svg3"></svg>
+    </div>
+    <div class="panel">
+      <h2>4. Shrivelled Map</h2>
+      <p class="desc">L'Hostis style: cities at peaks, valleys between</p>
+      <svg id="svg4"></svg>
+    </div>
+    <div class="panel">
+      <h2>5. Grid Deformation</h2>
+      <p class="desc">Lat/lng grid warped by time</p>
+      <svg id="svg5"></svg>
+    </div>
+    <div class="panel">
+      <h2>6. Multimodal Isochrone</h2>
+      <p class="desc">Rome2Rio style: bands emanate from airport hubs</p>
+      <svg id="svg6"></svg>
+    </div>
+    <div class="panel">
+      <h2>7. Pure MDS</h2>
+      <p class="desc">Optimized pairwise time-distance fit</p>
+      <svg id="svg7"></svg>
+    </div>
+    <div class="panel">
+      <h2>8. Chandelier</h2>
+      <p class="desc">Origin at top, cities hang by travel time</p>
+      <svg id="svg8"></svg>
+    </div>
+    <div class="panel">
+      <h2>9. Gravity Well</h2>
+      <p class="desc">Funnel shape: connected places sink inward</p>
+      <svg id="svg9"></svg>
+    </div>
+  </div>
+
+  <script>
+    const origin = { code: "LHR", city: "London", lat: 51.47, lng: -0.45 };
+
+    const destinations = [
+      { code: "CDG", city: "Paris", lat: 49.01, lng: 2.55, hours: 2.5 },
+      { code: "AMS", city: "Amsterdam", lat: 52.31, lng: 4.77, hours: 2.5 },
+      { code: "FRA", city: "Frankfurt", lat: 50.04, lng: 8.56, hours: 3.0 },
+      { code: "MAD", city: "Madrid", lat: 40.50, lng: -3.57, hours: 4.0 },
+      { code: "FCO", city: "Rome", lat: 41.80, lng: 12.24, hours: 4.5 },
+      { code: "ARN", city: "Stockholm", lat: 59.65, lng: 17.92, hours: 4.5 },
+      { code: "LIS", city: "Lisbon", lat: 38.77, lng: -9.13, hours: 4.5 },
+      { code: "ATH", city: "Athens", lat: 37.94, lng: 23.94, hours: 5.5 },
+      { code: "IST", city: "Istanbul", lat: 41.26, lng: 28.74, hours: 6.0 },
+      { code: "KEF", city: "Reykjavik", lat: 63.99, lng: -22.62, hours: 5.0 },
+      { code: "JFK", city: "New York", lat: 40.64, lng: -73.78, hours: 9.5 },
+      { code: "BOS", city: "Boston", lat: 42.36, lng: -71.01, hours: 9.0 },
+      { code: "ORD", city: "Chicago", lat: 41.98, lng: -87.90, hours: 11.0 },
+      { code: "MIA", city: "Miami", lat: 25.80, lng: -80.29, hours: 11.5 },
+      { code: "YYZ", city: "Toronto", lat: 43.68, lng: -79.63, hours: 10.0 },
+      { code: "LAX", city: "Los Angeles", lat: 33.94, lng: -118.41, hours: 13.5 },
+      { code: "SFO", city: "San Francisco", lat: 37.62, lng: -122.38, hours: 13.0 },
+      { code: "SEA", city: "Seattle", lat: 47.45, lng: -122.31, hours: 12.5 },
+      { code: "DEN", city: "Denver", lat: 39.86, lng: -104.67, hours: 12.0 },
+      { code: "YVR", city: "Vancouver", lat: 49.19, lng: -123.18, hours: 12.0 },
+    ];
+
+    function haversine(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    destinations.forEach(d => {
+      d.distanceKm = haversine(origin.lat, origin.lng, d.lat, d.lng);
+    });
+
+    function estimateTravelTime(lat, lng) {
+      const dist = haversine(origin.lat, origin.lng, lat, lng);
+      const avgSpeed = 600;
+      let baseTime = dist / avgSpeed;
+      let minDist = Infinity, nearestCity = null;
+      destinations.forEach(d => {
+        const cityDist = haversine(lat, lng, d.lat, d.lng);
+        if (cityDist < minDist) { minDist = cityDist; nearestCity = d; }
+      });
+      if (nearestCity && minDist < 500) {
+        const blend = minDist / 500;
+        const cityBasedTime = nearestCity.hours * (dist / nearestCity.distanceKm);
+        baseTime = baseTime * blend + cityBasedTime * (1 - blend);
+      }
+      return Math.max(0.5, baseTime);
+    }
+
+    // ============================================
+    // 1. Geographic Baseline
+    // ============================================
+    function initPanel1(land) {
+      const svg = d3.select("#svg1");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+
+      const projection = d3.geoNaturalEarth1()
+        .center([-30, 45])
+        .scale(width / 4)
+        .translate([width / 2, height / 2]);
+
+      const path = d3.geoPath(projection);
+      svg.append("path").datum(land).attr("class", "land").attr("d", path);
+
+      const originPos = projection([origin.lng, origin.lat]);
+
+      destinations.forEach(d => {
+        const pos = projection([d.lng, d.lat]);
+        svg.append("line").attr("class", "connector")
+          .attr("x1", originPos[0]).attr("y1", originPos[1])
+          .attr("x2", pos[0]).attr("y2", pos[1]);
+      });
+
+      destinations.forEach(d => {
+        const pos = projection([d.lng, d.lat]);
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", pos[0]).attr("cy", pos[1]).attr("r", 3);
+      });
+
+      svg.append("circle").attr("class", "origin-ring")
+        .attr("cx", originPos[0]).attr("cy", originPos[1]).attr("r", 10);
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", originPos[0]).attr("cy", originPos[1]).attr("r", 4);
+    }
+
+    // ============================================
+    // 2. Radial Time-Space
+    // ============================================
+    function initPanel2(land) {
+      const svg = d3.select("#svg2");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+      const cx = width / 2, cy = height / 2;
+      const maxRadius = Math.min(width, height) / 2 - 20;
+      const maxHours = 14;
+
+      const miniProj = d3.geoNaturalEarth1().center([-30, 45]).scale(100).translate([0, 0]);
+      const originMini = miniProj([origin.lng, origin.lat]);
+
+      // Warp land outline (faint ghost)
+      function warpPoint(lng, lat) {
+        const posMini = miniProj([lng, lat]);
+        if (!posMini) return null;
+        const dx = posMini[0] - originMini[0];
+        const dy = originMini[1] - posMini[1];
+        const bearing = Math.atan2(dx, dy);
+        const timeHours = estimateTravelTime(lat, lng);
+        const r = (timeHours / maxHours) * maxRadius;
+        return [cx + r * Math.sin(bearing), cy - r * Math.cos(bearing)];
+      }
+
+      // Draw warped land outline (very faint)
+      const features = land.type === "FeatureCollection" ? land.features : [land];
+      features.forEach(feature => {
+        if (!feature.geometry) return;
+        const coords = feature.geometry.coordinates;
+        const geomType = feature.geometry.type;
+
+        function processRing(ring) {
+          const points = [];
+          for (let i = 0; i < ring.length; i += 5) {
+            const [lng, lat] = ring[i];
+            const p = warpPoint(lng, lat);
+            if (p && !isNaN(p[0]) && !isNaN(p[1])) points.push(p);
+          }
+          return points;
+        }
+
+        if (geomType === "Polygon") {
+          coords.forEach(ring => {
+            const points = processRing(ring);
+            if (points.length > 2) {
+              svg.append("path")
+                .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                .attr("fill", "none").attr("stroke", "#ddd").attr("stroke-width", 0.5);
+            }
+          });
+        } else if (geomType === "MultiPolygon") {
+          coords.forEach(polygon => {
+            polygon.forEach(ring => {
+              const points = processRing(ring);
+              if (points.length > 2) {
+                svg.append("path")
+                  .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                  .attr("fill", "none").attr("stroke", "#ddd").attr("stroke-width", 0.5);
+              }
+            });
+          });
+        }
+      });
+
+      // Time rings
+      [4, 8, 12].forEach(h => {
+        const r = (h / maxHours) * maxRadius;
+        svg.append("circle").attr("class", "time-ring")
+          .attr("cx", cx).attr("cy", cy).attr("r", r);
+        svg.append("text").attr("class", "label")
+          .attr("x", cx + r + 3).attr("y", cy + 3).text(h + "h");
+      });
+
+      // City dots
+      destinations.forEach(d => {
+        const posMini = miniProj([d.lng, d.lat]);
+        const dx = posMini[0] - originMini[0];
+        const dy = originMini[1] - posMini[1];
+        const bearing = Math.atan2(dx, dy);
+        const r = (d.hours / maxHours) * maxRadius;
+        const x = cx + r * Math.sin(bearing);
+        const y = cy - r * Math.cos(bearing);
+
+        svg.append("line").attr("class", "connector")
+          .attr("x1", cx).attr("y1", cy).attr("x2", x).attr("y2", y);
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", x).attr("cy", y).attr("r", 3);
+      });
+
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", cx).attr("cy", cy).attr("r", 4);
+    }
+
+    // ============================================
+    // 3. Warped Coastlines
+    // ============================================
+    function initPanel3(land) {
+      const svg = d3.select("#svg3");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+      const cx = width / 2, cy = height / 2;
+      const maxRadius = Math.min(width, height) / 2 - 10;
+      const maxHours = 14;
+
+      const refProjection = d3.geoNaturalEarth1()
+        .center([-30, 45]).scale(width / 4).translate([width / 2, height / 2]);
+      const originRefPos = refProjection([origin.lng, origin.lat]);
+
+      [4, 8, 12].forEach(h => {
+        const r = (h / maxHours) * maxRadius;
+        svg.append("circle").attr("class", "time-ring")
+          .attr("cx", cx).attr("cy", cy).attr("r", r);
+      });
+
+      function warpPoint(lng, lat) {
+        const geoPos = refProjection([lng, lat]);
+        if (!geoPos) return null;
+        const dx = geoPos[0] - originRefPos[0];
+        const dy = originRefPos[1] - geoPos[1];
+        const screenBearing = Math.atan2(dx, dy);
+        const timeHours = estimateTravelTime(lat, lng);
+        const timeRadius = (timeHours / maxHours) * maxRadius;
+        return [cx + timeRadius * Math.sin(screenBearing), cy - timeRadius * Math.cos(screenBearing)];
+      }
+
+      // Process land features
+      const features = land.type === "FeatureCollection" ? land.features : [land];
+      features.forEach(feature => {
+        const geom = feature.geometry || feature;
+        if (!geom || !geom.coordinates) return;
+
+        function processRing(ring) {
+          const sampleRate = Math.max(1, Math.floor(ring.length / 60));
+          const sampled = ring.filter((_, i) => i % sampleRate === 0);
+          const points = sampled.map(c => warpPoint(c[0], c[1])).filter(p => p);
+          return points.length >= 3 ? points : null;
+        }
+
+        function drawPolygon(coords) {
+          coords.forEach(ring => {
+            const warpedRing = processRing(ring);
+            if (!warpedRing) return;
+            svg.append("path").attr("class", "land-warped")
+              .attr("d", "M" + warpedRing.map(p => p.join(",")).join("L") + "Z");
+          });
+        }
+
+        if (geom.type === "Polygon") drawPolygon(geom.coordinates);
+        else if (geom.type === "MultiPolygon") geom.coordinates.forEach(p => drawPolygon(p));
+      });
+
+      destinations.forEach(d => {
+        const refPos = refProjection([d.lng, d.lat]);
+        const dx = refPos[0] - originRefPos[0];
+        const dy = originRefPos[1] - refPos[1];
+        const bearing = Math.atan2(dx, dy);
+        const r = (d.hours / maxHours) * maxRadius;
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", cx + r * Math.sin(bearing))
+          .attr("cy", cy - r * Math.cos(bearing)).attr("r", 3);
+      });
+
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", cx).attr("cy", cy).attr("r", 4);
+    }
+
+    // ============================================
+    // 4. Shrivelled Map - L'Hostis style
+    // Simple side-view: cities at top, cones drop down
+    // ============================================
+    function initPanel4(land) {
+      const svg = d3.select("#svg4");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+
+      // Fewer airports, well-spaced, with varying cone depths
+      const airports = [
+        { code: "SEA", depth: 140 },
+        { code: "LAX", depth: 120 },
+        { code: "DEN", depth: 110 },
+        { code: "ORD", depth: 100 },
+        { code: "ATL", depth: 95 },
+        { code: "JFK", depth: 90 },
+      ];
+
+      const n = airports.length;
+      const margin = 50;
+      const spacing = (width - 2 * margin) / (n - 1);
+
+      // Position airports evenly
+      airports.forEach((a, i) => {
+        a.x = margin + i * spacing;
+      });
+
+      const topY = 55;
+      const coneWidth = 32;
+
+      // Draw horizontal "air network" line at top first
+      svg.append("line")
+        .attr("x1", margin - 20)
+        .attr("x2", width - margin + 20)
+        .attr("y1", topY)
+        .attr("y2", topY)
+        .attr("stroke", "#3498db")
+        .attr("stroke-width", 3)
+        .attr("opacity", 0.8);
+
+      // Draw each cone as a clean triangle dropping from the line
+      airports.forEach(airport => {
+        const cx = airport.x;
+        const tipY = topY + airport.depth;
+
+        // Main triangle (front face)
+        svg.append("polygon")
+          .attr("points", [
+            [cx - coneWidth/2, topY],
+            [cx + coneWidth/2, topY],
+            [cx, tipY]
+          ].map(p => p.join(",")).join(" "))
+          .attr("fill", "#f4d03f")
+          .attr("stroke", "#d4a017")
+          .attr("stroke-width", 1.5);
+
+        // Left edge highlight
+        svg.append("line")
+          .attr("x1", cx - coneWidth/2)
+          .attr("y1", topY)
+          .attr("x2", cx)
+          .attr("y2", tipY)
+          .attr("stroke", "#b8860b")
+          .attr("stroke-width", 2);
+
+        // Right edge highlight
+        svg.append("line")
+          .attr("x1", cx + coneWidth/2)
+          .attr("y1", topY)
+          .attr("x2", cx)
+          .attr("y2", tipY)
+          .attr("stroke", "#e8c84a")
+          .attr("stroke-width", 1);
+      });
+
+      // Draw airport markers on top of the blue line
+      airports.forEach(airport => {
+        svg.append("circle")
+          .attr("cx", airport.x)
+          .attr("cy", topY)
+          .attr("r", 6)
+          .attr("fill", "#e74c3c")
+          .attr("stroke", "#fff")
+          .attr("stroke-width", 2);
+
+        svg.append("text")
+          .attr("x", airport.x)
+          .attr("y", topY - 14)
+          .attr("text-anchor", "middle")
+          .attr("font-size", "9px")
+          .attr("fill", "#333")
+          .attr("font-weight", "600")
+          .text(airport.code);
+      });
+
+      // Legend
+      svg.append("text")
+        .attr("x", 10).attr("y", height - 8)
+        .attr("font-size", "8px")
+        .attr("fill", "#666")
+        .text("Cone depth = ground travel time from airport");
+
+      svg.append("text")
+        .attr("x", 10).attr("y", height - 20)
+        .attr("font-size", "8px")
+        .attr("fill", "#3498db")
+        .text("Blue line = fast air network connecting airports");
+    }
+
+    // ============================================
+    // 5. Grid Deformation
+    // ============================================
+    function initPanel5(land) {
+      const svg = d3.select("#svg5");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+      const cx = width / 2, cy = height / 2;
+      const maxRadius = Math.min(width, height) / 2 - 10;
+      const maxHours = 14;
+
+      const refProjection = d3.geoNaturalEarth1()
+        .center([-30, 45]).scale(width / 4).translate([width / 2, height / 2]);
+      const originRefPos = refProjection([origin.lng, origin.lat]);
+
+      function warpPoint(lng, lat) {
+        const geoPos = refProjection([lng, lat]);
+        if (!geoPos) return null;
+        const dx = geoPos[0] - originRefPos[0];
+        const dy = originRefPos[1] - geoPos[1];
+        const screenBearing = Math.atan2(dx, dy);
+        const timeHours = estimateTravelTime(lat, lng);
+        const timeRadius = (timeHours / maxHours) * maxRadius;
+        return [cx + timeRadius * Math.sin(screenBearing), cy - timeRadius * Math.cos(screenBearing)];
+      }
+
+      // Draw warped land outlines
+      const features = land.type === "FeatureCollection" ? land.features : [land];
+      features.forEach(feature => {
+        if (!feature.geometry) return;
+        const coords = feature.geometry.coordinates;
+        const geomType = feature.geometry.type;
+
+        function processRing(ring) {
+          const points = [];
+          for (let i = 0; i < ring.length; i += 4) {
+            const [lng, lat] = ring[i];
+            const p = warpPoint(lng, lat);
+            if (p && !isNaN(p[0]) && !isNaN(p[1])) points.push(p);
+          }
+          return points;
+        }
+
+        if (geomType === "Polygon") {
+          coords.forEach(ring => {
+            const points = processRing(ring);
+            if (points.length > 2) {
+              svg.append("path")
+                .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                .attr("fill", "none").attr("stroke", "#aaa").attr("stroke-width", 0.8);
+            }
+          });
+        } else if (geomType === "MultiPolygon") {
+          coords.forEach(polygon => {
+            polygon.forEach(ring => {
+              const points = processRing(ring);
+              if (points.length > 2) {
+                svg.append("path")
+                  .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                  .attr("fill", "none").attr("stroke", "#aaa").attr("stroke-width", 0.8);
+              }
+            });
+          });
+        }
+      });
+
+      // Latitude lines (more sparse)
+      for (let lat = -45; lat <= 75; lat += 20) {
+        const points = [];
+        for (let lng = -170; lng <= 170; lng += 8) {
+          const p = warpPoint(lng, lat);
+          if (p) points.push(p);
+        }
+        if (points.length > 1) {
+          svg.append("path").attr("class", "grid-line")
+            .attr("d", "M" + points.map(p => p.join(",")).join("L"));
+        }
+      }
+
+      // Longitude lines (more sparse)
+      for (let lng = -160; lng < 180; lng += 30) {
+        const points = [];
+        for (let lat = -45; lat <= 75; lat += 8) {
+          const p = warpPoint(lng, lat);
+          if (p) points.push(p);
+        }
+        if (points.length > 1) {
+          svg.append("path").attr("class", "grid-line")
+            .attr("d", "M" + points.map(p => p.join(",")).join("L"));
+        }
+      }
+
+      // Cities
+      destinations.forEach(d => {
+        const refPos = refProjection([d.lng, d.lat]);
+        const dx = refPos[0] - originRefPos[0];
+        const dy = originRefPos[1] - refPos[1];
+        const bearing = Math.atan2(dx, dy);
+        const r = (d.hours / maxHours) * maxRadius;
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", cx + r * Math.sin(bearing))
+          .attr("cy", cy - r * Math.cos(bearing)).attr("r", 3);
+      });
+
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", cx).attr("cy", cy).attr("r", 4);
+    }
+
+    // ============================================
+    // 6. Time Terrain - side profile view
+    // ============================================
+    // ============================================
+    // 6. Multimodal Isochrone - Rome2Rio style
+    // Isochrones emanate from airport hubs
+    // ============================================
+    function initPanel6(land) {
+      const svg = d3.select("#svg6");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+
+      const projection = d3.geoNaturalEarth1()
+        .center([-30, 45])
+        .scale(width / 3.5)
+        .translate([width / 2, height / 2]);
+      const path = d3.geoPath(projection);
+
+      // All airports (origin + destinations)
+      const allAirports = [origin, ...destinations];
+
+      // Rome2Rio-style colors (saturated pastels like the original)
+      const colors = {
+        band1: "#f4c7c3", // < 4h - salmon pink (nearest)
+        band2: "#f9e0a2", // 4-8h - warm yellow
+        band3: "#c5e0b4", // 8-12h - light green
+        band4: "#9dc3e6", // 12-16h - light blue
+        band5: "#b4c7dc"  // > 16h - gray-blue (farthest)
+      };
+
+      // Calculate travel time from London to any point
+      // = flight time to nearest connected airport + ground travel from that airport
+      function getTravelTime(lng, lat) {
+        let minTime = Infinity;
+
+        // Check each airport
+        allAirports.forEach(airport => {
+          // Flight time from London to this airport
+          const flightTime = airport.code === "LHR" ? 0 : airport.hours;
+
+          // Ground distance from this airport to the point (rough estimate)
+          const groundDist = Math.sqrt(
+            Math.pow((lng - airport.lng) * Math.cos(lat * Math.PI / 180), 2) +
+            Math.pow(lat - airport.lat, 2)
+          ) * 111; // km
+
+          // Ground travel at ~60 km/h average
+          const groundTime = groundDist / 60;
+
+          const totalTime = flightTime + groundTime;
+          if (totalTime < minTime) minTime = totalTime;
+        });
+
+        return minTime;
+      }
+
+      // Create a grid of points and calculate travel times
+      const gridSize = 4; // degrees
+      const points = [];
+      for (let lng = -130; lng <= 40; lng += gridSize) {
+        for (let lat = 25; lat <= 70; lat += gridSize) {
+          const time = getTravelTime(lng, lat);
+          const pos = projection([lng, lat]);
+          if (pos) {
+            points.push({ lng, lat, time, x: pos[0], y: pos[1] });
+          }
+        }
+      }
+
+      // Draw isochrone contours using Voronoi-like approach
+      // Draw bands from farthest to nearest
+      const bandLimits = [20, 16, 12, 8, 4];
+      const bandColors = [colors.band5, colors.band4, colors.band3, colors.band2, colors.band1];
+
+      bandLimits.forEach((limit, idx) => {
+        allAirports.forEach(airport => {
+          const pos = projection([airport.lng, airport.lat]);
+          if (!pos) return;
+
+          // Flight time from London
+          const flightTime = airport.code === "LHR" ? 0 : airport.hours;
+
+          // Radius for this band (remaining time for ground travel)
+          const remainingTime = limit - flightTime;
+          if (remainingTime <= 0) return;
+
+          // Convert remaining time to approximate radius (60 km/h, scaled to projection)
+          const radiusKm = remainingTime * 60;
+          const radiusDeg = radiusKm / 111;
+
+          // Calculate pixel radius at this location
+          const testPos = projection([airport.lng + radiusDeg, airport.lat]);
+          if (!testPos) return;
+          const radiusPx = Math.abs(testPos[0] - pos[0]);
+
+          svg.append("circle")
+            .attr("cx", pos[0])
+            .attr("cy", pos[1])
+            .attr("r", radiusPx)
+            .attr("fill", bandColors[idx])
+            .attr("opacity", 0.7)
+            .attr("stroke", "none");
+        });
+      });
+
+      // Draw land outline on top
+      svg.append("path").datum(land)
+        .attr("d", path)
+        .attr("fill", "none")
+        .attr("stroke", "#888")
+        .attr("stroke-width", 0.8);
+
+      // Draw airports as red dots
+      allAirports.forEach(airport => {
+        const pos = projection([airport.lng, airport.lat]);
+        if (!pos) return;
+
+        svg.append("circle")
+          .attr("cx", pos[0])
+          .attr("cy", pos[1])
+          .attr("r", airport.code === "LHR" ? 4 : 2.5)
+          .attr("fill", "#c0392b")
+          .attr("stroke", "#fff")
+          .attr("stroke-width", 0.5);
+      });
+
+      // Legend
+      const legendX = 8, legendY = height - 22;
+      const bandLabels = ["<4h", "4-8h", "8-12h", "12-16h", ">16h"];
+      [colors.band1, colors.band2, colors.band3, colors.band4, colors.band5].forEach((c, i) => {
+        svg.append("rect")
+          .attr("x", legendX + i * 28).attr("y", legendY)
+          .attr("width", 24).attr("height", 8)
+          .attr("fill", c)
+          .attr("stroke", "#999")
+          .attr("stroke-width", 0.5);
+      });
+      svg.append("text").attr("class", "label")
+        .attr("x", legendX).attr("y", legendY - 3)
+        .attr("font-size", "6px")
+        .text("Travel time from London (multimodal)");
+    }
+
+    // ============================================
+    // 7. Pure MDS - Pairwise connections showing time similarity
+    // ============================================
+    function initPanel7(land) {
+      const svg = d3.select("#svg7");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+      const cx = width / 2, cy = height / 2;
+      const maxRadius = Math.min(width, height) / 2 - 25;
+      const maxHours = 14;
+
+      const miniProj = d3.geoNaturalEarth1().center([-30, 45]).scale(100).translate([0, 0]);
+      const originMini = miniProj([origin.lng, origin.lat]);
+
+      function warpPoint(lng, lat) {
+        const posMini = miniProj([lng, lat]);
+        if (!posMini) return null;
+        const dx = posMini[0] - originMini[0];
+        const dy = originMini[1] - posMini[1];
+        const bearing = Math.atan2(dx, dy);
+        const timeHours = estimateTravelTime(lat, lng);
+        const r = (timeHours / maxHours) * maxRadius;
+        return [cx + r * Math.sin(bearing), cy - r * Math.cos(bearing)];
+      }
+
+      // Draw warped land outline (faint)
+      const features = land.type === "FeatureCollection" ? land.features : [land];
+      features.forEach(feature => {
+        if (!feature.geometry) return;
+        const coords = feature.geometry.coordinates;
+        const geomType = feature.geometry.type;
+
+        function processRing(ring) {
+          const points = [];
+          for (let i = 0; i < ring.length; i += 5) {
+            const [lng, lat] = ring[i];
+            const p = warpPoint(lng, lat);
+            if (p && !isNaN(p[0]) && !isNaN(p[1])) points.push(p);
+          }
+          return points;
+        }
+
+        if (geomType === "Polygon") {
+          coords.forEach(ring => {
+            const points = processRing(ring);
+            if (points.length > 2) {
+              svg.append("path")
+                .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                .attr("fill", "none").attr("stroke", "#ddd").attr("stroke-width", 0.5);
+            }
+          });
+        } else if (geomType === "MultiPolygon") {
+          coords.forEach(polygon => {
+            polygon.forEach(ring => {
+              const points = processRing(ring);
+              if (points.length > 2) {
+                svg.append("path")
+                  .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                  .attr("fill", "none").attr("stroke", "#ddd").attr("stroke-width", 0.5);
+              }
+            });
+          });
+        }
+      });
+
+      const allCities = [...destinations];
+
+      // Position by bearing and time radius
+      allCities.forEach(d => {
+        const dlat = d.lat - origin.lat;
+        const dlng = d.lng - origin.lng;
+        d.bearing = Math.atan2(dlng, dlat);
+        d.timeRadius = (d.hours / 14) * maxRadius;
+        d.x = cx + d.timeRadius * Math.sin(d.bearing);
+        d.y = cy - d.timeRadius * Math.cos(d.bearing);
+      });
+
+      // Draw pairwise connections
+      for (let i = 0; i < allCities.length; i++) {
+        for (let j = i + 1; j < allCities.length; j++) {
+          const c1 = allCities[i], c2 = allCities[j];
+          const timeDiff = Math.abs(c1.hours - c2.hours);
+          if (timeDiff < 3) {
+            const opacity = 0.4 - timeDiff * 0.1;
+            svg.append("line")
+              .attr("x1", c1.x).attr("y1", c1.y)
+              .attr("x2", c2.x).attr("y2", c2.y)
+              .attr("stroke", "#3498db")
+              .attr("stroke-width", 1)
+              .attr("opacity", opacity);
+          }
+        }
+      }
+
+      // Time rings
+      [4, 8, 12].forEach(h => {
+        const r = (h / 14) * maxRadius;
+        svg.append("circle").attr("class", "time-ring")
+          .attr("cx", cx).attr("cy", cy).attr("r", r);
+        svg.append("text").attr("class", "axis-label")
+          .attr("x", cx + r + 2).attr("y", cy).text(h + "h");
+      });
+
+      // Cities
+      allCities.forEach(d => {
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", d.x).attr("cy", d.y).attr("r", 3);
+        svg.append("text").attr("class", "label")
+          .attr("x", d.x).attr("y", d.y - 6)
+          .attr("text-anchor", "middle").text(d.code);
+      });
+
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", cx).attr("cy", cy).attr("r", 5);
+
+      svg.append("text").attr("class", "label")
+        .attr("x", 10).attr("y", height - 8)
+        .text("Connections = similar travel time");
+    }
+
+    // ============================================
+    // 8. Chandelier - Origin at top, cities hang down
+    // ============================================
+    function initPanel8() {
+      const svg = d3.select("#svg8");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+      const margin = { top: 25, bottom: 15, left: 15, right: 15 };
+
+      // Origin at top center
+      const originX = width / 2;
+      const originY = margin.top;
+
+      // Y scale: depth = travel time
+      const yScale = d3.scaleLinear()
+        .domain([0, 14])
+        .range([margin.top, height - margin.bottom]);
+
+      // X scale: spread cities by bearing
+      const allCities = [...destinations];
+      allCities.forEach(d => {
+        const dlng = d.lng - origin.lng;
+        d.bearing = dlng; // simplified: use longitude difference for spread
+      });
+
+      // Sort by bearing for cleaner layout
+      allCities.sort((a, b) => a.bearing - b.bearing);
+
+      // Draw tier lines
+      [4, 8, 12].forEach(h => {
+        const y = yScale(h);
+        svg.append("line").attr("class", "tier-line")
+          .attr("x1", margin.left).attr("y1", y)
+          .attr("x2", width - margin.right).attr("y2", y);
+        svg.append("text").attr("class", "axis-label")
+          .attr("x", width - margin.right + 3).attr("y", y + 3).text(h + "h");
+      });
+
+      // Position cities with some spread
+      const xScale = d3.scaleLinear()
+        .domain([d3.min(allCities, d => d.bearing), d3.max(allCities, d => d.bearing)])
+        .range([margin.left + 20, width - margin.right - 20]);
+
+      // Draw drop lines and cities
+      allCities.forEach(d => {
+        const x = xScale(d.bearing);
+        const y = yScale(d.hours);
+
+        // Drop line from origin
+        svg.append("line").attr("class", "drop-line")
+          .attr("x1", originX).attr("y1", originY)
+          .attr("x2", x).attr("y2", y);
+
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", x).attr("cy", y).attr("r", 3);
+        svg.append("text").attr("class", "label")
+          .attr("x", x).attr("y", y + 10)
+          .attr("text-anchor", "middle").text(d.code);
+      });
+
+      // Origin at top
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", originX).attr("cy", originY).attr("r", 6);
+      svg.append("text").attr("class", "label")
+        .attr("x", originX).attr("y", originY - 8)
+        .attr("text-anchor", "middle").text("LHR");
+    }
+
+    // ============================================
+    // 9. Gravity Well - Funnel with depth lines
+    // ============================================
+    function initPanel9(land) {
+      const svg = d3.select("#svg9");
+      const width = svg.node().clientWidth;
+      const height = svg.node().clientHeight;
+      const cx = width / 2, cy = height / 2;
+      const maxRadius = Math.min(width, height) / 2 - 15;
+      const maxHours = 14;
+
+      const miniProj = d3.geoNaturalEarth1().center([-30, 45]).scale(100).translate([0, 0]);
+      const originMini = miniProj([origin.lng, origin.lat]);
+
+      function warpPoint(lng, lat) {
+        const posMini = miniProj([lng, lat]);
+        if (!posMini) return null;
+        const dx = posMini[0] - originMini[0];
+        const dy = originMini[1] - posMini[1];
+        const bearing = Math.atan2(dx, dy);
+        const timeHours = estimateTravelTime(lat, lng);
+        const r = (timeHours / maxHours) * maxRadius;
+        return [cx + r * Math.sin(bearing), cy - r * Math.cos(bearing)];
+      }
+
+      // Draw warped land outline
+      const features = land.type === "FeatureCollection" ? land.features : [land];
+      features.forEach(feature => {
+        if (!feature.geometry) return;
+        const coords = feature.geometry.coordinates;
+        const geomType = feature.geometry.type;
+
+        function processRing(ring) {
+          const points = [];
+          for (let i = 0; i < ring.length; i += 5) {
+            const [lng, lat] = ring[i];
+            const p = warpPoint(lng, lat);
+            if (p && !isNaN(p[0]) && !isNaN(p[1])) points.push(p);
+          }
+          return points;
+        }
+
+        if (geomType === "Polygon") {
+          coords.forEach(ring => {
+            const points = processRing(ring);
+            if (points.length > 2) {
+              svg.append("path")
+                .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                .attr("fill", "none").attr("stroke", "#ccc").attr("stroke-width", 0.6);
+            }
+          });
+        } else if (geomType === "MultiPolygon") {
+          coords.forEach(polygon => {
+            polygon.forEach(ring => {
+              const points = processRing(ring);
+              if (points.length > 2) {
+                svg.append("path")
+                  .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+                  .attr("fill", "none").attr("stroke", "#ccc").attr("stroke-width", 0.6);
+              }
+            });
+          });
+        }
+      });
+
+      const allCities = [...destinations];
+      allCities.forEach(d => {
+        const dlat = d.lat - origin.lat;
+        const dlng = d.lng - origin.lng;
+        d.bearing = Math.atan2(dlng, dlat);
+        d.wellRadius = (d.hours / 14) * maxRadius;
+      });
+
+      // Draw spiral depth lines (funnel effect)
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+        const points = [];
+        for (let r = 5; r <= maxRadius; r += 3) {
+          // Slight spiral twist as radius increases
+          const twist = angle + (r / maxRadius) * 0.3;
+          points.push([
+            cx + r * Math.cos(twist),
+            cy + r * Math.sin(twist)
+          ]);
+        }
+        svg.append("path")
+          .attr("d", "M" + points.map(p => p.join(",")).join("L"))
+          .attr("fill", "none")
+          .attr("stroke", "#ddd")
+          .attr("stroke-width", 0.5);
+      }
+
+      // Draw concentric depth rings
+      [2, 4, 6, 8, 10, 12, 14].forEach(h => {
+        const r = (h / 14) * maxRadius;
+        svg.append("circle")
+          .attr("cx", cx).attr("cy", cy).attr("r", r)
+          .attr("fill", "none")
+          .attr("stroke", h % 4 === 0 ? "#bbb" : "#e0e0e0")
+          .attr("stroke-width", h % 4 === 0 ? 1 : 0.5);
+      });
+
+      // Time labels
+      [4, 8, 12].forEach(h => {
+        const r = (h / 14) * maxRadius;
+        svg.append("text").attr("class", "axis-label")
+          .attr("x", cx + r + 3).attr("y", cy).text(h + "h");
+      });
+
+      // Draw "pull" lines from cities to center
+      allCities.forEach(d => {
+        const x = cx + d.wellRadius * Math.sin(d.bearing);
+        const y = cy - d.wellRadius * Math.cos(d.bearing);
+
+        svg.append("line")
+          .attr("x1", cx).attr("y1", cy)
+          .attr("x2", x).attr("y2", y)
+          .attr("stroke", "#e74c3c")
+          .attr("stroke-width", 0.5)
+          .attr("opacity", 0.3);
+      });
+
+      // Draw cities
+      allCities.forEach(d => {
+        const x = cx + d.wellRadius * Math.sin(d.bearing);
+        const y = cy - d.wellRadius * Math.cos(d.bearing);
+
+        svg.append("circle").attr("class", "city-dot")
+          .attr("cx", x).attr("cy", y).attr("r", 3);
+        svg.append("text").attr("class", "label")
+          .attr("x", x).attr("y", y - 6)
+          .attr("text-anchor", "middle").text(d.code);
+      });
+
+      // Origin at center
+      svg.append("circle").attr("class", "origin-marker")
+        .attr("cx", cx).attr("cy", cy).attr("r", 6);
+
+      svg.append("text").attr("class", "label")
+        .attr("x", 10).attr("y", height - 8)
+        .text("Gravity pulls toward London (center)");
+    }
+
+    // ============================================
+    // INIT
+    // ============================================
+    async function init() {
+      const world = await d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json");
+      const land = topojson.feature(world, world.objects.land);
+
+      initPanel1(land);
+      initPanel2(land);
+      initPanel3(land);
+      initPanel4(land);
+      initPanel5(land);
+      initPanel6(land);
+      initPanel7(land);
+      initPanel8();
+      initPanel9(land);
+    }
+
+    init();
+  </script>
+</body>
+</html>
