@@ -1366,9 +1366,11 @@ let isUpdatingGrid = false;
 
 function getResolutionForZoom(zoom) {
   // Finer resolutions since we only render viewport
-  if (zoom < 2) return 2;       // Globe view: res 2 (~86k km² cells)
-  if (zoom < 3.5) return 3;     // Continental: res 3 (~12k km² cells)
-  if (zoom < 5) return 4;       // Regional: res 4 (~1.7k km² cells)
+  // Lower res = bigger hexes = fewer cells = faster render
+  if (zoom < 1.5) return 1;     // Far globe: res 1 (~10k km² cells, very few)
+  if (zoom < 2.5) return 2;     // Globe view: res 2 (~86k km² cells)
+  if (zoom < 4) return 3;       // Continental: res 3 (~12k km² cells)
+  if (zoom < 5.5) return 4;     // Regional: res 4 (~1.7k km² cells)
   if (zoom < 7) return 5;       // Local: res 5 (~252 km² cells)
   return 6;                      // Street level: res 6 (~36 km² cells)
 }
