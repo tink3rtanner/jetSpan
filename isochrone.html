@@ -488,6 +488,7 @@
 let LOADED_AIRPORTS = null;  // {code: {name, lat, lng, country, type}}
 let LOADED_ROUTES = null;    // {code: [destinations]}
 let LOADED_GROUND = {};      // {region: {airport: {h3cell: minutes}}}
+let LOADED_ISOCHRONE = null; // pre-computed isochrone data {resolutions: {res: {h3cell: {time, route}}}}
 let DATA_LOADED = false;
 
 // region mapping for lazy loading ground data
@@ -560,6 +561,51 @@ async function loadGroundData(region) {
   }
   LOADED_GROUND[region] = {};
   return {};
+}
+
+// load pre-computed isochrone data for an origin
+async function loadIsochroneData(originKey) {
+  try {
+    const res = await fetch(`data/isochrones/${originKey}.json`);
+    if (res.ok) {
+      LOADED_ISOCHRONE = await res.json();
+      const totalCells = Object.values(LOADED_ISOCHRONE.resolutions).reduce((a, b) => a + Object.keys(b).length, 0);
+      console.log(`[JetSpan] Loaded pre-computed isochrone for ${originKey}: ${totalCells} cells across ${Object.keys(LOADED_ISOCHRONE.resolutions).length} resolutions`);
+      return LOADED_ISOCHRONE;
+    }
+  } catch (e) {
+    console.log(`[JetSpan] No pre-computed isochrone for ${originKey}, will compute on-demand`);
+  }
+  LOADED_ISOCHRONE = null;
+  return null;
+}
+
+// lookup pre-computed travel time by H3 cell
+function getPrecomputedTravelTime(h3Cell, resolution) {
+  if (!LOADED_ISOCHRONE) return null;
+
+  const resData = LOADED_ISOCHRONE.resolutions[String(resolution)];
+  if (!resData) return null;
+
+  const cellData = resData[h3Cell];
+  if (!cellData) return null;
+
+  // convert to same format as calculateTotalTravelTime
+  return {
+    totalMinutes: cellData.time,
+    breakdown: {
+      groundTo: cellData.route?.ground_to || 0,
+      overhead: cellData.route?.overhead || 90,
+      flight: cellData.route?.flight || 0,
+      arrival: cellData.route?.arrival || 60,
+      groundFrom: cellData.route?.ground_from || 0,
+    },
+    route: {
+      originAirport: cellData.route?.origin_airport || 'N/A',
+      destAirport: cellData.route?.dest_airport || 'N/A',
+      isDirect: cellData.route?.is_direct !== false,
+    }
+  };
 }
 
 function getAirportRegion(code) {
@@ -1281,21 +1327,27 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
         const boundary = h3.cellToBoundary(h3Index);
         const centroid = h3.cellToLatLng(h3Index);
 
-        // Calculate travel time (with caching)
+        // Calculate travel time (with caching and pre-computed data)
         const calcStart = performance.now();
         let result = getTravelTimeFromCache(h3Index, currentOrigin);
         if (!result) {
-          // Quick check: if nearest airport is >300km away, likely water/remote - skip
-          const destCoords = [centroid[1], centroid[0]];
-          const nearestAirports = findNearestAirports(destCoords, 1);
-          if (nearestAirports.length > 0 && nearestAirports[0].distance > 300) {
-            // Skip water/remote cells - don't compute or render
-            timings.calcTravel += performance.now() - calcStart;
-            timings.cells++;
-            continue;
+          // Try pre-computed data first (fast path)
+          result = getPrecomputedTravelTime(h3Index, resolution);
+          if (result) {
+            setTravelTimeCache(h3Index, currentOrigin, result);
+          } else {
+            // Quick check: if nearest airport is >300km away, likely water/remote - skip
+            const destCoords = [centroid[1], centroid[0]];
+            const nearestAirports = findNearestAirports(destCoords, 1);
+            if (nearestAirports.length > 0 && nearestAirports[0].distance > 300) {
+              // Skip water/remote cells - don't compute or render
+              timings.calcTravel += performance.now() - calcStart;
+              timings.cells++;
+              continue;
+            }
+            result = calculateTotalTravelTime(origin, destCoords);
+            setTravelTimeCache(h3Index, currentOrigin, result);
           }
-          result = calculateTotalTravelTime(origin, destCoords);
-          setTravelTimeCache(h3Index, currentOrigin, result);
         }
         timings.calcTravel += performance.now() - calcStart;
         timings.cells++;
@@ -1382,6 +1434,9 @@ async function initMap() {
   // preload ground data for origin's region
   const originRegion = COUNTRY_TO_REGION['GB'] || 'europe';  // default to europe for bristol
   await loadGroundData(originRegion);
+
+  // load pre-computed isochrone data for current origin (if available)
+  await loadIsochroneData(currentOrigin);
 
   map = new maplibregl.Map({
     container: 'map',
