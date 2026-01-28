@@ -422,8 +422,10 @@
     <div class="legend-item"><div class="legend-color" style="background: #f97316;"></div> 6-8 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #ef4444;"></div> 8-10 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #dc2626;"></div> 10-12 hours</div>
-    <div class="legend-item"><div class="legend-color" style="background: #991b1b;"></div> 12-14 hours</div>
-    <div class="legend-item"><div class="legend-color" style="background: #450a0a;"></div> 14+ hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #a855f7;"></div> 12-14 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #7c3aed;"></div> 14-18 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #4c1d95;"></div> 18-24 hours</div>
+    <div class="legend-item"><div class="legend-color" style="background: #1e1b4b;"></div> 24+ hours</div>
   </div>
 
   <!-- Tooltip -->
@@ -926,14 +928,16 @@ const FLIGHT_TIMES = {
 // TIME BANDS (Galton-style colors)
 // =============================================================================
 const TIME_BANDS = [
-  { maxHours: 2, color: '#22c55e', label: '< 2h' },
-  { maxHours: 4, color: '#84cc16', label: '2-4h' },
-  { maxHours: 6, color: '#eab308', label: '4-6h' },
-  { maxHours: 8, color: '#f97316', label: '6-8h' },
-  { maxHours: 10, color: '#ef4444', label: '8-10h' },
-  { maxHours: 12, color: '#dc2626', label: '10-12h' },
-  { maxHours: 14, color: '#991b1b', label: '12-14h' },
-  { maxHours: Infinity, color: '#450a0a', label: '14h+' },
+  { maxHours: 2, color: '#22c55e', label: '< 2h' },      // green
+  { maxHours: 4, color: '#84cc16', label: '2-4h' },      // lime
+  { maxHours: 6, color: '#eab308', label: '4-6h' },      // yellow
+  { maxHours: 8, color: '#f97316', label: '6-8h' },      // orange
+  { maxHours: 10, color: '#ef4444', label: '8-10h' },    // red
+  { maxHours: 12, color: '#dc2626', label: '10-12h' },   // dark red
+  { maxHours: 14, color: '#a855f7', label: '12-14h' },   // purple - distinct from red
+  { maxHours: 18, color: '#7c3aed', label: '14-18h' },   // violet
+  { maxHours: 24, color: '#4c1d95', label: '18-24h' },   // deep purple
+  { maxHours: Infinity, color: '#1e1b4b', label: '24h+' }, // near black purple
 ];
 
 // =============================================================================
@@ -1281,7 +1285,16 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
         const calcStart = performance.now();
         let result = getTravelTimeFromCache(h3Index, currentOrigin);
         if (!result) {
-          result = calculateTotalTravelTime(origin, [centroid[1], centroid[0]]);
+          // Quick check: if nearest airport is >300km away, likely water/remote - skip
+          const destCoords = [centroid[1], centroid[0]];
+          const nearestAirports = findNearestAirports(destCoords, 1);
+          if (nearestAirports.length > 0 && nearestAirports[0].distance > 300) {
+            // Skip water/remote cells - don't compute or render
+            timings.calcTravel += performance.now() - calcStart;
+            timings.cells++;
+            continue;
+          }
+          result = calculateTotalTravelTime(origin, destCoords);
           setTravelTimeCache(h3Index, currentOrigin, result);
         }
         timings.calcTravel += performance.now() - calcStart;
