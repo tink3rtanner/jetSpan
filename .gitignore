@@ -1,0 +1,15 @@
+# intermediate/raw data files
+raw/
+*.zip
+
+# python
+__pycache__/
+*.pyc
+.env
+
+# os
+.DS_Store
+
+# editor
+*.swp
+*.swo

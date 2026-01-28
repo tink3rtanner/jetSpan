@@ -148,6 +148,46 @@
       transform: translateX(18px);
     }
 
+    /* Settings toggle button */
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      padding: 4px 0;
+      margin-bottom: 8px;
+    }
+
+    .settings-header:hover {
+      opacity: 0.8;
+    }
+
+    .settings-toggle {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 50%;
+      font-size: 14px;
+      transition: transform 0.2s;
+    }
+
+    .settings-toggle.expanded {
+      transform: rotate(180deg);
+    }
+
+    .settings-content {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .settings-content.expanded {
+      max-height: 200px;
+    }
+
     /* Legend */
     .legend {
       position: absolute;
@@ -350,20 +390,25 @@
     </div>
 
     <div class="control-group">
-      <label>Display Options</label>
-      <div class="toggle-row">
-        <span>Show airports</span>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggle-airports" checked>
-          <span class="toggle-slider"></span>
-        </label>
+      <div class="settings-header" onclick="toggleSettings()">
+        <label style="cursor: pointer; margin-bottom: 0;">Display Options</label>
+        <div class="settings-toggle" id="settings-toggle">▼</div>
       </div>
-      <div class="toggle-row">
-        <span>Show hex grid</span>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggle-grid" checked>
-          <span class="toggle-slider"></span>
-        </label>
+      <div class="settings-content" id="settings-content">
+        <div class="toggle-row">
+          <span>Show airports</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-airports" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Show hex grid</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-grid" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
     </div>
   </div>
@@ -433,6 +478,120 @@
   </div>
 
 <script>
+// =============================================================================
+// DYNAMIC DATA LOADING
+// =============================================================================
+
+// loaded data (populated by loadJetSpanData)
+let LOADED_AIRPORTS = null;  // {code: {name, lat, lng, country, type}}
+let LOADED_ROUTES = null;    // {code: [destinations]}
+let LOADED_GROUND = {};      // {region: {airport: {h3cell: minutes}}}
+let DATA_LOADED = false;
+
+// region mapping for lazy loading ground data
+const COUNTRY_TO_REGION = {
+  'GB': 'europe', 'FR': 'europe', 'DE': 'europe', 'ES': 'europe', 'IT': 'europe',
+  'NL': 'europe', 'BE': 'europe', 'AT': 'europe', 'CH': 'europe', 'PT': 'europe',
+  'IE': 'europe', 'NO': 'europe', 'SE': 'europe', 'DK': 'europe', 'FI': 'europe',
+  'US': 'north-america', 'CA': 'north-america', 'MX': 'north-america',
+  'JP': 'asia', 'CN': 'asia', 'KR': 'asia', 'IN': 'asia', 'TH': 'asia', 'SG': 'asia',
+  'AU': 'oceania', 'NZ': 'oceania',
+  'AE': 'middle-east', 'QA': 'middle-east', 'SA': 'middle-east', 'IL': 'middle-east',
+  'BR': 'south-america', 'AR': 'south-america', 'CL': 'south-america',
+  'ZA': 'africa', 'KE': 'africa', 'NG': 'africa', 'EG': 'africa',
+};
+
+// travel time cache: h3Cell -> {origin: result}
+let _travelTimeCache = {};
+let _currentCacheOrigin = null;
+
+function getTravelTimeFromCache(h3Cell, origin) {
+  if (_currentCacheOrigin !== origin) {
+    _travelTimeCache = {};  // clear cache on origin change
+    _currentCacheOrigin = origin;
+  }
+  return _travelTimeCache[h3Cell];
+}
+
+function setTravelTimeCache(h3Cell, origin, result) {
+  if (_currentCacheOrigin !== origin) {
+    _travelTimeCache = {};
+    _currentCacheOrigin = origin;
+  }
+  _travelTimeCache[h3Cell] = result;
+}
+
+async function loadJetSpanData() {
+  try {
+    // load core data (airports + routes)
+    const [airportsRes, routesRes] = await Promise.all([
+      fetch('data/airports.json'),
+      fetch('data/routes.json'),
+    ]);
+
+    if (airportsRes.ok && routesRes.ok) {
+      LOADED_AIRPORTS = await airportsRes.json();
+      LOADED_ROUTES = await routesRes.json();
+      DATA_LOADED = true;
+      console.log(`[JetSpan] Loaded ${Object.keys(LOADED_AIRPORTS).length} airports, ${Object.values(LOADED_ROUTES).reduce((a,b) => a + b.length, 0)} routes`);
+
+      // pre-build spatial index
+      buildAirportSpatialIndex();
+    }
+  } catch (e) {
+    console.log('[JetSpan] Data files not found, using fallback data');
+  }
+}
+
+async function loadGroundData(region) {
+  if (LOADED_GROUND[region]) return LOADED_GROUND[region];
+
+  try {
+    const res = await fetch(`data/ground/${region}.json`);
+    if (res.ok) {
+      LOADED_GROUND[region] = await res.json();
+      console.log(`[JetSpan] Loaded ground data for ${region}: ${Object.keys(LOADED_GROUND[region]).length} airports`);
+      return LOADED_GROUND[region];
+    }
+  } catch (e) {
+    // ignore, will fall back to estimate
+  }
+  LOADED_GROUND[region] = {};
+  return {};
+}
+
+function getAirportRegion(code) {
+  const country = LOADED_AIRPORTS?.[code]?.country || '';
+  return COUNTRY_TO_REGION[country] || 'other';
+}
+
+// check if route exists in loaded data
+function hasRoute(fromCode, toCode) {
+  if (!LOADED_ROUTES) return false;
+  return LOADED_ROUTES[fromCode]?.includes(toCode) ||
+         LOADED_ROUTES[toCode]?.includes(fromCode);
+}
+
+// estimate flight time from distance (used when we have route but no schedule)
+function estimateFlightMinutes(distKm) {
+  if (distKm < 500) return Math.round(distKm / 400 * 60 + 30);
+  if (distKm < 1500) return Math.round(distKm / 550 * 60 + 25);
+  if (distKm < 4000) return Math.round(distKm / 700 * 60 + 25);
+  if (distKm < 8000) return Math.round(distKm / 800 * 60 + 25);
+  return Math.round(distKm / 850 * 60 + 30);
+}
+
+// get ground time from OSRM data (lookup by H3 cell at res 6)
+function getOSRMGroundTime(airportCode, destLng, destLat) {
+  const region = getAirportRegion(airportCode);
+  const regionData = LOADED_GROUND[region];
+  if (!regionData || !regionData[airportCode]) return null;
+
+  // convert dest coords to H3 cell at res 6
+  const h3Cell = h3.latLngToCell(destLat, destLng, 6);
+  return regionData[airportCode][h3Cell] || null;
+}
+
 // =============================================================================
 // DATA: Origins
 // =============================================================================
@@ -803,13 +962,24 @@ function estimateGroundTime(fromCoords, toCoords) {
 }
 
 function getFlightTime(fromCode, toCode) {
-  // Check direct routes
+  // Check hardcoded times first (known accurate times)
   if (FLIGHT_TIMES[fromCode]?.[toCode]) {
     return FLIGHT_TIMES[fromCode][toCode];
   }
   if (FLIGHT_TIMES[toCode]?.[fromCode]) {
     return FLIGHT_TIMES[toCode][fromCode];
   }
+
+  // Check loaded route data - if route exists, estimate time from distance
+  if (DATA_LOADED && hasRoute(fromCode, toCode)) {
+    const fromApt = LOADED_AIRPORTS[fromCode];
+    const toApt = LOADED_AIRPORTS[toCode];
+    if (fromApt && toApt) {
+      const dist = haversineDistance([fromApt.lng, fromApt.lat], [toApt.lng, toApt.lat]);
+      return estimateFlightMinutes(dist);
+    }
+  }
+
   return null;
 }
 
@@ -832,6 +1002,14 @@ function formatTime(minutes) {
   const mins = minutes % 60;
   if (hours === 0) return `${mins}m`;
   return `${hours}h ${mins.toString().padStart(2, '0')}m`;
+}
+
+// toggle settings panel visibility
+function toggleSettings() {
+  const content = document.getElementById('settings-content');
+  const toggle = document.getElementById('settings-toggle');
+  content.classList.toggle('expanded');
+  toggle.classList.toggle('expanded');
 }
 
 function getTimeBandColor(totalMinutes) {
@@ -863,9 +1041,75 @@ function findNearestAirport(coords) {
   return { airport: nearest, distance: minDist };
 }
 
+// cache for converted airports array (avoid recreating every call)
+let _airportsArrayCache = null;
+let _airportSpatialIndex = null;  // H3 cell -> airports in that cell
+const SPATIAL_INDEX_RES = 3;      // coarse res for fast lookup (~180km cells)
+
+function getAirportsArray() {
+  if (_airportsArrayCache) return _airportsArrayCache;
+
+  if (DATA_LOADED && LOADED_AIRPORTS) {
+    _airportsArrayCache = Object.entries(LOADED_AIRPORTS).map(([code, data]) => ({
+      code,
+      name: data.name,
+      coordinates: [data.lng, data.lat],
+      country: data.country,
+    }));
+  } else {
+    _airportsArrayCache = AIRPORTS;
+  }
+  return _airportsArrayCache;
+}
+
+function buildAirportSpatialIndex() {
+  if (_airportSpatialIndex) return _airportSpatialIndex;
+
+  console.log('[PERF] Building airport spatial index...');
+  const start = performance.now();
+  _airportSpatialIndex = {};
+
+  const airports = getAirportsArray();
+  for (const airport of airports) {
+    const cell = h3.latLngToCell(airport.coordinates[1], airport.coordinates[0], SPATIAL_INDEX_RES);
+    if (!_airportSpatialIndex[cell]) _airportSpatialIndex[cell] = [];
+    _airportSpatialIndex[cell].push(airport);
+  }
+
+  console.log(`[PERF] Spatial index built in ${(performance.now() - start).toFixed(0)}ms (${Object.keys(_airportSpatialIndex).length} cells)`);
+  return _airportSpatialIndex;
+}
+
 function findNearestAirports(coords, count = 10) {
-  // Find the N nearest airports to given coordinates
-  const airportsWithDist = AIRPORTS.map(airport => ({
+  // Use spatial index for fast lookup
+  const index = buildAirportSpatialIndex();
+
+  // Get the cell for this coordinate and expand to neighboring cells
+  const centerCell = h3.latLngToCell(coords[1], coords[0], SPATIAL_INDEX_RES);
+
+  // Start with k=1 ring, expand if needed
+  let candidates = [];
+  let k = 1;
+  const maxK = 5;  // max ~900km search radius
+
+  while (candidates.length < count * 2 && k <= maxK) {
+    const cells = h3.gridDisk(centerCell, k);
+    candidates = [];
+    for (const cell of cells) {
+      if (index[cell]) {
+        candidates.push(...index[cell]);
+      }
+    }
+    k++;
+  }
+
+  // If still not enough, fall back to full search (rare, remote areas)
+  if (candidates.length < count) {
+    candidates = getAirportsArray();
+  }
+
+  // Calculate distances and sort
+  const airportsWithDist = candidates.map(airport => ({
     airport,
     distance: haversineDistance(coords, airport.coordinates)
   }));
@@ -873,6 +1117,22 @@ function findNearestAirports(coords, count = 10) {
   airportsWithDist.sort((a, b) => a.distance - b.distance);
 
   return airportsWithDist.slice(0, count);
+}
+
+// airport code -> coordinates lookup (built on first use)
+let _airportCoordsLookup = null;
+function getAirportCoords(code) {
+  if (!_airportCoordsLookup) {
+    _airportCoordsLookup = {};
+    for (const apt of getAirportsArray()) {
+      _airportCoordsLookup[apt.code] = apt.coordinates;
+    }
+    // also add from AIRPORTS (hardcoded)
+    for (const apt of AIRPORTS) {
+      _airportCoordsLookup[apt.code] = apt.coordinates;
+    }
+  }
+  return _airportCoordsLookup[code];
 }
 
 function calculateTotalTravelTime(origin, destCoords) {
@@ -896,15 +1156,18 @@ function calculateTotalTravelTime(origin, destCoords) {
     };
   }
 
-  // Find top N nearest airports to destination (try multiple to find best route)
-  const nearestDestAirports = findNearestAirports(destCoords, 10);
+  // Find nearest airports to destination (5 is enough, 10 was overkill)
+  const nearestDestAirports = findNearestAirports(destCoords, 5);
   const allOriginAirports = [origin.nearestAirport, ...origin.alternativeAirports];
 
   let bestResult = null;
   let bestTime = Infinity;
 
-  // Try all combinations of origin airports and destination airports
+  // Try combinations of origin airports and destination airports
   for (const originAirport of allOriginAirports) {
+    // early exit if we found a good route (< 4 hours)
+    if (bestTime < 240) break;
+
     for (const { airport: destAirport, distance: destAirportDist } of nearestDestAirports) {
       // Ground: origin → airport
       const groundTo = originAirport.groundTimeMinutes;
@@ -917,9 +1180,9 @@ function calculateTotalTravelTime(origin, destCoords) {
 
       // If no direct flight, estimate based on distance
       if (flight === null) {
-        const originAirportData = AIRPORTS.find(a => a.code === originAirport.code);
-        if (originAirportData) {
-          flight = estimateFlightFromDistance(originAirportData.coordinates, destAirport.coordinates);
+        const originCoords = getAirportCoords(originAirport.code);
+        if (originCoords) {
+          flight = estimateFlightFromDistance(originCoords, destAirport.coordinates);
         } else {
           continue;
         }
@@ -930,7 +1193,11 @@ function calculateTotalTravelTime(origin, destCoords) {
       const arrivalOverhead = isInternational ? 60 : 30;
 
       // Ground: destination airport → destination
-      const groundFrom = Math.round((destAirportDist / 40) * 60);
+      // Try OSRM data first, fall back to haversine estimate
+      let groundFrom = getOSRMGroundTime(destAirport.code, destCoords[0], destCoords[1]);
+      if (groundFrom === null) {
+        groundFrom = Math.round((destAirportDist / 40) * 60);
+      }
 
       const total = groundTo + airportOverhead + flight + arrivalOverhead + groundFrom;
 
@@ -964,6 +1231,8 @@ function calculateTotalTravelTime(origin, destCoords) {
 
 function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
   const features = [];
+  const timings = { cells: 0, findAirports: 0, calcTravel: 0, total: 0 };
+  const startTotal = performance.now();
 
   // Resolution guide:
   // Resolution 2 = ~86,000 km² per cell (very coarse, fast)
@@ -1008,8 +1277,15 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
         const boundary = h3.cellToBoundary(h3Index);
         const centroid = h3.cellToLatLng(h3Index);
 
-        // Calculate travel time
-        const result = calculateTotalTravelTime(origin, [centroid[1], centroid[0]]);
+        // Calculate travel time (with caching)
+        const calcStart = performance.now();
+        let result = getTravelTimeFromCache(h3Index, currentOrigin);
+        if (!result) {
+          result = calculateTotalTravelTime(origin, [centroid[1], centroid[0]]);
+          setTravelTimeCache(h3Index, currentOrigin, result);
+        }
+        timings.calcTravel += performance.now() - calcStart;
+        timings.cells++;
 
         if (result) {
           const color = getTimeBandColor(result.totalMinutes);
@@ -1055,6 +1331,10 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
     }
   }
 
+  timings.total = performance.now() - startTotal;
+  console.log(`[PERF] Grid generation: ${timings.cells} cells in ${timings.total.toFixed(0)}ms`);
+  console.log(`[PERF]   calcTravel: ${timings.calcTravel.toFixed(0)}ms (${(timings.calcTravel/timings.cells).toFixed(2)}ms/cell)`);
+
   return {
     type: 'FeatureCollection',
     features,
@@ -1081,6 +1361,13 @@ function getResolutionForZoom(zoom) {
 }
 
 async function initMap() {
+  // load external data (airports, routes, ground times)
+  await loadJetSpanData();
+
+  // preload ground data for origin's region
+  const originRegion = COUNTRY_TO_REGION['GB'] || 'europe';  // default to europe for bristol
+  await loadGroundData(originRegion);
+
   map = new maplibregl.Map({
     container: 'map',
     style: 'https://tiles.openfreemap.org/styles/positron',
@@ -1336,10 +1623,12 @@ function updateGrid(resolution = currentResolution, flyToOrigin = true) {
     map.getSource('hexgrid').setData(gridData);
     map.getSource('origin').setData(generateOriginGeoJSON());
 
-    // Update stats
+    // Update stats - use loaded data counts if available
     document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
-    document.getElementById('stat-airports').textContent = AIRPORTS.length;
-    document.getElementById('stat-routes').textContent = Object.values(FLIGHT_TIMES).reduce((sum, routes) => sum + Object.keys(routes).length, 0);
+    const airportCount = LOADED_AIRPORTS ? Object.keys(LOADED_AIRPORTS).length : AIRPORTS.length;
+    const routeCount = LOADED_ROUTES ? Object.values(LOADED_ROUTES).reduce((a,b) => a + b.length, 0) : Object.values(FLIGHT_TIMES).reduce((sum, routes) => sum + Object.keys(routes).length, 0);
+    document.getElementById('stat-airports').textContent = airportCount.toLocaleString();
+    document.getElementById('stat-routes').textContent = routeCount.toLocaleString();
 
     // Only fly to origin when origin changes, not on resolution change
     if (flyToOrigin) {

@@ -1,0 +1,8 @@
+{
+  "amadeus_only": 20764,
+  "openflights_only": 18104,
+  "both": 19491,
+  "total_airports": 3514,
+  "total_routes": 58359,
+  "airports_with_routes": 3463
+}

@@ -20,9 +20,25 @@ JetSpan visualizes flight travel times on a 3D globe using hexagonal isochrone c
 **Key Features:**
 - Globe projection with rotatable 3D view
 - H3 hexagonal cells colored by travel time bands
-- 6 origin cities, 81 airports, 349 routes
+- 6 origin cities, 4518 airports, 58k routes (from data/*.json)
 - Dynamic resolution based on zoom level
 - Interactive tooltips with routing breakdown
+- OSRM-based ground transport times (partial, 3 airports tested)
+
+## Data Pipeline
+
+Real data loaded from `data/` directory:
+- `airports.json` - 4518 airports from OurAirports
+- `routes.json` - 58k routes merged from Amadeus + OpenFlights
+- `ground/{region}.json` - OSRM driving times (lazy loaded)
+
+Scripts in `scripts/`:
+- `fetch-airports.py` - download airport data
+- `crawl-amadeus.py` - crawl route data (needs AMADEUS_API_KEY/SECRET env vars)
+- `compute-ground-times.py` - compute OSRM ground times (~50h for all airports)
+- `sanity-checks.py` - validate data
+
+See `HANDOFF.md` for detailed implementation notes.
 
 ## Other Files (legacy)
 - `index.html` - Warped map visualizations
@@ -56,8 +72,19 @@ Cells crossing 180° longitude are normalized by shifting negative longitudes to
 - `flight-isochrone-spec.md` - Original specification
 - `spec.md` - General project spec
 
-## Future Improvements
-- Real flight data integration (OpenFlights API)
-- Hub routing for indirect flights
-- Web Workers for smoother grid computation
-- Land-only cell filtering
+## Remaining Tasks (Priority Order)
+
+1. **Skip water cells** - don't compute travel time for ocean cells
+2. **Pre-compute on load** - compute all res 2-3 cells upfront for instant panning
+3. **Run full OSRM** - `python scripts/compute-ground-times.py` (~50h on Pi)
+4. **UI cleanup** - collapse settings behind (i) button
+5. **Color distribution** - more granularity for 10-16+ hour destinations
+6. **Hub routing** - 1-stop connections via major hubs
+7. **Web Workers** - offload computation to background thread
+
+## Performance Notes
+
+- First render: ~28s (computing 40k cells)
+- Cached render: ~0.4s (lookup only)
+- Spatial index for airports built on load (12ms)
+- Travel time cache clears on origin change
