@@ -608,6 +608,135 @@ function getPrecomputedTravelTime(h3Cell, resolution) {
   };
 }
 
+// =============================================================================
+// DIRECT RENDERING (skip grid iteration for pre-computed resolutions)
+// =============================================================================
+// For res 1-3 we have pre-computed data. Instead of iterating a grid of cells
+// and checking each one, we directly iterate the pre-computed cells. This is
+// O(pre-computed cells) instead of O(viewport cells).
+//
+// Hybrid approach:
+// - res 1-3: direct render from pre-computed (fast, ~2700 cells total)
+// - res 4+: fall back to grid iteration with on-demand compute
+// =============================================================================
+
+function generateHexGridDirect(origin, resolution, viewportBounds) {
+  const startTotal = performance.now();
+
+  if (!LOADED_ISOCHRONE) {
+    console.log('[PERF] Direct render: no pre-computed data, falling back to grid');
+    return null;
+  }
+
+  const resData = LOADED_ISOCHRONE.resolutions[String(resolution)];
+  if (!resData) {
+    console.log(`[PERF] Direct render: no res ${resolution} data, falling back to grid`);
+    return null;
+  }
+
+  const features = [];
+  const cells = Object.keys(resData);
+  let inViewport = 0;
+  let outViewport = 0;
+
+  // use viewport bounds if provided
+  const bounds = viewportBounds || { north: 85, south: -85, east: 180, west: -180 };
+  // add padding to avoid edge artifacts
+  const latPad = (bounds.north - bounds.south) * 0.15;
+  const lngPad = (bounds.east - bounds.west) * 0.15;
+  const padded = {
+    north: Math.min(85, bounds.north + latPad),
+    south: Math.max(-85, bounds.south - latPad),
+    east: Math.min(180, bounds.east + lngPad),
+    west: Math.max(-180, bounds.west - lngPad),
+  };
+
+  for (const h3Index of cells) {
+    try {
+      const centroid = h3.cellToLatLng(h3Index);
+      const [lat, lng] = centroid;
+
+      // simple viewport check (handles antimeridian edge cases roughly)
+      const inLat = lat >= padded.south && lat <= padded.north;
+      let inLng = lng >= padded.west && lng <= padded.east;
+      // handle antimeridian wrap
+      if (padded.west > padded.east) {
+        inLng = lng >= padded.west || lng <= padded.east;
+      }
+
+      if (!inLat || !inLng) {
+        outViewport++;
+        continue;
+      }
+      inViewport++;
+
+      const cellData = resData[h3Index];
+      const result = {
+        totalMinutes: cellData.time,
+        breakdown: {
+          groundTo: cellData.route?.ground_to || 0,
+          overhead: cellData.route?.overhead || 90,
+          flight: cellData.route?.flight || 0,
+          arrival: cellData.route?.arrival || 60,
+          groundFrom: cellData.route?.ground_from || 0,
+        },
+        route: {
+          originAirport: cellData.route?.origin_airport || 'N/A',
+          destAirport: cellData.route?.dest_airport || 'N/A',
+          isDirect: cellData.route?.is_direct !== false,
+        }
+      };
+
+      // cache it for tooltip lookups
+      setTravelTimeCache(h3Index, currentOrigin, result);
+
+      const color = getTimeBandColor(result.totalMinutes);
+      const boundary = h3.cellToBoundary(h3Index);
+
+      // convert boundary to GeoJSON coordinates [lng, lat]
+      let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
+
+      // handle antimeridian crossing
+      const lngs = coordinates.map(c => c[0]);
+      const hasPositive = lngs.some(lng => lng > 90);
+      const hasNegative = lngs.some(lng => lng < -90);
+      if (hasPositive && hasNegative) {
+        coordinates = coordinates.map(([lng, lat]) => [
+          lng < 0 ? lng + 360 : lng,
+          lat
+        ]);
+      }
+      coordinates.push(coordinates[0]); // close polygon
+
+      features.push({
+        type: 'Feature',
+        properties: {
+          h3Index,
+          travelTimeMinutes: result.totalMinutes,
+          color,
+          breakdown: result.breakdown,
+          route: result.route,
+          centroid: [centroid[1], centroid[0]],
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [coordinates],
+        }
+      });
+    } catch (e) {
+      // skip invalid cells
+    }
+  }
+
+  const elapsed = performance.now() - startTotal;
+  console.log(`[PERF] Direct render res ${resolution}: ${inViewport} in-view, ${outViewport} out-of-view, ${elapsed.toFixed(0)}ms`);
+
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
 function getAirportRegion(code) {
   const country = LOADED_AIRPORTS?.[code]?.country || '';
   return COUNTRY_TO_REGION[country] || 'other';
@@ -1280,6 +1409,17 @@ function calculateTotalTravelTime(origin, destCoords) {
 // =============================================================================
 
 function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
+  // HYBRID APPROACH:
+  // - res 1-3: try direct render from pre-computed data (fast path)
+  // - res 4+: grid iteration with on-demand compute (slower but necessary)
+  if (resolution <= 3 && LOADED_ISOCHRONE) {
+    const directResult = generateHexGridDirect(origin, resolution, viewportBounds);
+    if (directResult && directResult.features.length > 0) {
+      return directResult;
+    }
+    // fall through to grid iteration if direct failed
+  }
+
   const features = [];
   const timings = { cells: 0, findAirports: 0, calcTravel: 0, total: 0 };
   const startTotal = performance.now();
