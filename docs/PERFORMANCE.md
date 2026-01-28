@@ -162,7 +162,46 @@ Less important now that res 1-3 are fast via direct rendering.
 | Pan (zoomed in) | ~20s | <3s | 3-5s | ✅ MET |
 | Zoom level change | ~15-30s | <2s | **<15ms** | ✅ EXCEEDED |
 
-**Ultimate goal achieved**: Pre-computed JSON + direct rendering = instant for res 1-3
+**Ultimate goal achieved**: Pre-computed JSON + direct rendering = instant for res 1-4
+
+---
+
+## Session Notes (2026-01-28 late)
+
+### Pre-compute Expansion (res 1-4)
+
+Extended pre-compute from res 1-3 to res 1-4:
+- **res 5 skipped** - 2M+ cells globally, takes 60+ min to compute, diminishing returns
+- **res 4 added** - covers zoom 4-5.5, good detail for regional views
+
+**Compute times (Bristol origin):**
+| Resolution | Global cells | Computed | Skipped | Time |
+|------------|-------------|----------|---------|------|
+| 1 | 842 | 46 | 796 | ~3s |
+| 2 | 5,882 | 344 | 5,538 | ~20s |
+| 3 | 41,162 | ~2,348 | ~38k | ~2.5 min |
+| 4 | 288,122 | TBD | TBD | ~10 min est |
+
+**Total expected:** ~15 min compute, ~2-5 MB file
+
+### Code Changes
+
+1. **precompute-isochrone.py** - RESOLUTIONS = [1, 2, 3, 4]
+2. **isochrone.html** - resolution <= 4 for direct rendering
+3. **routing fix** (by other agent) - removed fake flight estimates, only real routes
+
+### Hybrid Architecture
+
+```
+zoom 0-4:   res 1-4 → direct render from pre-computed JSON (instant)
+zoom 4.5+:  res 5-6 → grid iteration with on-demand compute (~1-3s)
+```
+
+### Next Steps
+
+- [ ] Pre-compute finishes, test UI performance
+- [ ] Integrate dijkstra router (other agent's work)
+- [ ] Consider per-origin pre-compute for multiple cities
 
 ---
 

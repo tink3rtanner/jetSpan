@@ -611,13 +611,13 @@ function getPrecomputedTravelTime(h3Cell, resolution) {
 // =============================================================================
 // DIRECT RENDERING (skip grid iteration for pre-computed resolutions)
 // =============================================================================
-// For res 1-3 we have pre-computed data. Instead of iterating a grid of cells
+// For res 1-4 we have pre-computed data. Instead of iterating a grid of cells
 // and checking each one, we directly iterate the pre-computed cells. This is
 // O(pre-computed cells) instead of O(viewport cells).
 //
 // Hybrid approach:
-// - res 1-3: direct render from pre-computed (fast, ~2700 cells total)
-// - res 4+: fall back to grid iteration with on-demand compute
+// - res 1-4: direct render from pre-computed (fast)
+// - res 5+: fall back to grid iteration with on-demand compute
 // =============================================================================
 
 function generateHexGridDirect(origin, resolution, viewportBounds) {
@@ -1354,17 +1354,13 @@ function calculateTotalTravelTime(origin, destCoords) {
       // Airport overhead (security, boarding)
       const airportOverhead = 90;
 
-      // Flight time
+      // Flight time - only use routes that actually exist
       let flight = getFlightTime(originAirport.code, destAirport.code);
 
-      // If no direct flight, estimate based on distance
+      // No route exists - skip this origin-dest pair
+      // (don't estimate fake flights from distance)
       if (flight === null) {
-        const originCoords = getAirportCoords(originAirport.code);
-        if (originCoords) {
-          flight = estimateFlightFromDistance(originCoords, destAirport.coordinates);
-        } else {
-          continue;
-        }
+        continue;
       }
 
       // Arrival overhead (deplane, customs if intl)
@@ -1410,9 +1406,9 @@ function calculateTotalTravelTime(origin, destCoords) {
 
 function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
   // HYBRID APPROACH:
-  // - res 1-3: try direct render from pre-computed data (fast path)
-  // - res 4+: grid iteration with on-demand compute (slower but necessary)
-  if (resolution <= 3 && LOADED_ISOCHRONE) {
+  // - res 1-4: try direct render from pre-computed data (fast path)
+  // - res 5+: grid iteration with on-demand compute (slower but necessary)
+  if (resolution <= 4 && LOADED_ISOCHRONE) {
     const directResult = generateHexGridDirect(origin, resolution, viewportBounds);
     if (directResult && directResult.features.length > 0) {
       return directResult;
@@ -1744,9 +1740,25 @@ async function initMap() {
 
     // Dynamic resolution and viewport-based rendering
     let moveDebounceTimer = null;
+    let lastCenter = null;
+    let lastZoom = null;
+
     map.on('moveend', () => {
       const zoom = map.getZoom();
+      const center = map.getCenter();
       const newResolution = getResolutionForZoom(zoom);
+
+      // Skip if viewport hasn't changed significantly (reduces unnecessary re-renders)
+      if (lastCenter && lastZoom !== null) {
+        const zoomDiff = Math.abs(zoom - lastZoom);
+        const centerDiff = Math.abs(center.lng - lastCenter.lng) + Math.abs(center.lat - lastCenter.lat);
+        // Skip for tiny movements (< 0.5 degree pan and < 0.3 zoom change)
+        if (centerDiff < 0.5 && zoomDiff < 0.3) {
+          return;
+        }
+      }
+      lastCenter = center;
+      lastZoom = zoom;
 
       // Regenerate grid when viewport changes (pan or zoom)
       if (!isUpdatingGrid) {
@@ -1754,7 +1766,7 @@ async function initMap() {
         moveDebounceTimer = setTimeout(() => {
           currentResolution = newResolution;
           updateGrid(newResolution, false); // Don't fly to origin
-        }, 200); // Shorter debounce for snappier feel
+        }, 350); // Debounce to reduce rapid re-renders during pan/zoom
       }
     });
 

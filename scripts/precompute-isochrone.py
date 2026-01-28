@@ -57,9 +57,9 @@ ORIGINS = {
 }
 
 # resolutions to pre-compute
-# - res 1-3: compute ALL cells globally (~48k cells total)
-# - res 4+: skip for now (millions of cells, too slow)
-RESOLUTIONS = [1, 2, 3]
+# - res 1-4: compute ALL cells globally
+# - res 5+: skip (2M+ cells, too slow, diminishing returns)
+RESOLUTIONS = [1, 2, 3, 4]
 
 # skip cells >300km from any airport (water/remote)
 WATER_SKIP_DISTANCE_KM = 300
