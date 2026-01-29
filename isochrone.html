@@ -580,17 +580,51 @@ async function loadIsochroneData(originKey) {
   return null;
 }
 
-// lookup pre-computed travel time by H3 cell
-function getPrecomputedTravelTime(h3Cell, resolution) {
-  if (!LOADED_ISOCHRONE) return null;
-
-  const resData = LOADED_ISOCHRONE.resolutions[String(resolution)];
-  if (!resData) return null;
-
-  const cellData = resData[h3Cell];
-  if (!cellData) return null;
-
-  // convert to same format as calculateTotalTravelTime
+// parse pre-computed cell data into standard result format
+// handles both compact format (t/o/a/s) and verbose format (time/route)
+function parseCellData(cellData) {
+  // compact format: {t, o, a, s} or {t, d} for drive-only
+  if ('t' in cellData) {
+    if (cellData.d) {
+      // drive-only cell
+      return {
+        totalMinutes: cellData.t,
+        breakdown: { groundTo: cellData.t, overhead: 0, flight: 0, arrival: 0, groundFrom: 0 },
+        route: { originAirport: 'drive', destAirport: 'drive', isDirect: true, stops: -1, path: [] },
+      };
+    }
+    // flight cell — derive breakdown from origin/dest airport info
+    const originCode = cellData.o || 'N/A';
+    const destCode = cellData.a || 'N/A';
+    const stops = cellData.s || 0;
+    // look up ground_to from ORIGINS config
+    const originCity = ORIGINS[currentOrigin];
+    let groundTo = 0;
+    if (originCity) {
+      if (originCity.nearestAirport?.code === originCode) {
+        groundTo = originCity.nearestAirport.groundTimeMinutes || 0;
+      } else {
+        const alt = originCity.alternativeAirports?.find(a => a.code === originCode);
+        groundTo = alt?.groundTimeMinutes || 0;
+      }
+    }
+    const overhead = 90;
+    const connections = stops * 120; // 90min connection + 30min penalty per stop
+    // arrival: check if international
+    const originCountry = LOADED_AIRPORTS?.[originCode]?.country || '';
+    const destCountry = LOADED_AIRPORTS?.[destCode]?.country || '';
+    const arrival = (originCountry && destCountry && originCountry === destCountry) ? 30 : 60;
+    // flight = total - ground_to - overhead - connections - arrival - ground_from
+    // we don't know ground_from exactly, so estimate flight as residual
+    const knownOverhead = groundTo + overhead + connections + arrival;
+    const flight = Math.max(0, cellData.t - knownOverhead); // includes ground_from
+    return {
+      totalMinutes: cellData.t,
+      breakdown: { groundTo, overhead, flight, arrival, groundFrom: 0 },
+      route: { originAirport: originCode, destAirport: destCode, isDirect: stops === 0, stops, path: [] },
+    };
+  }
+  // verbose format (legacy): {time, route: {origin_airport, ...}}
   return {
     totalMinutes: cellData.time,
     breakdown: {
@@ -604,8 +638,20 @@ function getPrecomputedTravelTime(h3Cell, resolution) {
       originAirport: cellData.route?.origin_airport || 'N/A',
       destAirport: cellData.route?.dest_airport || 'N/A',
       isDirect: cellData.route?.is_direct !== false,
+      stops: cellData.route?.stops ?? 0,
+      path: cellData.route?.path || [],
     }
   };
+}
+
+// lookup pre-computed travel time by H3 cell
+function getPrecomputedTravelTime(h3Cell, resolution) {
+  if (!LOADED_ISOCHRONE) return null;
+  const resData = LOADED_ISOCHRONE.resolutions[String(resolution)];
+  if (!resData) return null;
+  const cellData = resData[h3Cell];
+  if (!cellData) return null;
+  return parseCellData(cellData);
 }
 
 // =============================================================================
@@ -671,21 +717,7 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
       inViewport++;
 
       const cellData = resData[h3Index];
-      const result = {
-        totalMinutes: cellData.time,
-        breakdown: {
-          groundTo: cellData.route?.ground_to || 0,
-          overhead: cellData.route?.overhead || 90,
-          flight: cellData.route?.flight || 0,
-          arrival: cellData.route?.arrival || 60,
-          groundFrom: cellData.route?.ground_from || 0,
-        },
-        route: {
-          originAirport: cellData.route?.origin_airport || 'N/A',
-          destAirport: cellData.route?.dest_airport || 'N/A',
-          isDirect: cellData.route?.is_direct !== false,
-        }
-      };
+      const result = parseCellData(cellData);
 
       // cache it for tooltip lookups
       setTravelTimeCache(h3Index, currentOrigin, result);
@@ -1881,11 +1913,22 @@ function showTooltip(properties) {
   document.getElementById('tooltip-time').textContent = formatTime(properties.travelTimeMinutes);
   document.getElementById('tooltip-time').style.color = properties.color;
 
-  if (route.isDirect) {
-    document.getElementById('tooltip-route').innerHTML = '<span>Direct ground transport</span>';
+  // route display: handle drive-only, direct flights, and multi-stop
+  const routeEl = document.getElementById('tooltip-route');
+  if (route.stops === -1 || route.originAirport === 'drive') {
+    routeEl.innerHTML = '<span>Drive only</span>';
+  } else if (route.path && Array.isArray(route.path) && route.path.length > 1) {
+    // multi-stop: show full path e.g. "Bristol → BRS ✈ LHR ✈ JFK"
+    const originName = ORIGINS[currentOrigin].name.split(',')[0];
+    const pathStr = route.path.join(' ✈ ');
+    routeEl.innerHTML = `<span>${originName} → ${pathStr}</span>`;
+  } else if (route.isDirect) {
+    const originName = ORIGINS[currentOrigin].name.split(',')[0];
+    routeEl.innerHTML =
+      `<span>${originName} → ${route.originAirport} ✈ ${route.destAirport}</span>`;
   } else {
     const originName = ORIGINS[currentOrigin].name.split(',')[0];
-    document.getElementById('tooltip-route').innerHTML =
+    routeEl.innerHTML =
       `<span>${originName} → ${route.originAirport} ✈ ${route.destAirport}</span>`;
   }
 

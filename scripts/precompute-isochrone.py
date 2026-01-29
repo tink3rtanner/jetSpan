@@ -2,36 +2,31 @@
 """
 Pre-compute isochrone data for a specific origin city.
 
-This script pre-computes travel times from a given origin to all H3 cells
-at multiple resolutions, storing results as JSON for instant lookup.
+Uses dijkstra_router for multi-stop routing (run once, O(1) per airport),
+then iterates all H3 cells globally at each resolution and finds the
+best reachable airport for each cell.
 
 Usage:
     python scripts/precompute-isochrone.py bristol
-    python scripts/precompute-isochrone.py --all  # all configured origins
+    python scripts/precompute-isochrone.py --all
 
 Output:
     data/isochrones/{origin}.json
-
-Structure:
-    {
-        "origin": "bristol",
-        "computed": "2024-01-28T...",
-        "resolutions": {
-            "1": { "h3index": {"time": 180, "route": {...}}, ... },
-            "2": { ... },
-            ...
-        }
-    }
 """
 
 import json
+import sys
+import os
 import time
 import math
 import argparse
 from pathlib import Path
 from datetime import datetime
 
-# try to import h3, install hint if missing
+# add scripts dir to path so we can import dijkstra_router
+sys.path.insert(0, os.path.dirname(__file__))
+from dijkstra_router import FlightGraph, DijkstraRouter, ORIGINS as DJ_ORIGINS
+
 try:
     import h3
 except ImportError:
@@ -43,31 +38,15 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 
-ORIGINS = {
-    "bristol": {
-        "name": "Bristol, UK",
-        "coords": [-2.587, 51.454],  # [lng, lat]
-        "airports": [
-            {"code": "BRS", "coords": [-2.719, 51.382], "ground_min": 25},
-            {"code": "LHR", "coords": [-0.461, 51.470], "ground_min": 120},
-            {"code": "LGW", "coords": [-0.190, 51.148], "ground_min": 150},
-            {"code": "BHX", "coords": [-1.748, 52.454], "ground_min": 90},
-        ]
-    }
-}
-
 # resolutions to pre-compute
-# - res 1-4: compute ALL cells globally
-# - res 5+: skip (2M+ cells, too slow, diminishing returns)
+# res 5+ = 2M+ cells, too slow, diminishing returns
 RESOLUTIONS = [1, 2, 3, 4]
 
-# skip cells >300km from any airport (water/remote)
-WATER_SKIP_DISTANCE_KM = 300
+# max ground distance from airport to cell (km)
+MAX_GROUND_KM = 400
 
-# airport overhead times (minutes)
-DEPARTURE_OVERHEAD = 90  # check-in, security, boarding
-ARRIVAL_OVERHEAD_DOMESTIC = 30
-ARRIVAL_OVERHEAD_INTL = 60
+# ground speed estimate (where no OSRM data)
+DEFAULT_GROUND_KPH = 40
 
 
 # =============================================================================
@@ -75,126 +54,31 @@ ARRIVAL_OVERHEAD_INTL = 60
 # =============================================================================
 
 def load_airports():
-    """load airports.json"""
     path = Path(__file__).parent.parent / "data" / "airports.json"
     with open(path) as f:
         return json.load(f)
 
-
 def load_routes():
-    """load routes.json"""
     path = Path(__file__).parent.parent / "data" / "routes.json"
     with open(path) as f:
         return json.load(f)
 
 
 # =============================================================================
-# DISTANCE & FLIGHT TIME CALCULATIONS
+# UTILITIES
 # =============================================================================
 
 def haversine_km(lat1, lon1, lat2, lon2):
-    """calculate great-circle distance in km"""
-    R = 6371  # earth radius km
+    """great-circle distance in km"""
+    R = 6371
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
     return 2 * R * math.asin(math.sqrt(a))
 
-
-def estimate_flight_time(dist_km):
-    """estimate flight time in minutes based on distance"""
-    if dist_km < 500:
-        return round(dist_km / 400 * 60 + 20)  # short haul
-    elif dist_km < 1500:
-        return round(dist_km / 550 * 60 + 25)
-    elif dist_km < 4000:
-        return round(dist_km / 700 * 60 + 25)
-    elif dist_km < 8000:
-        return round(dist_km / 800 * 60 + 25)
-    else:
-        return round(dist_km / 850 * 60 + 30)  # ultra long haul
-
-
-def estimate_ground_time(dist_km):
-    """estimate ground travel time from airport to destination"""
-    # assume ~60 km/h average speed
-    return round(dist_km / 60 * 60)
-
-
-# =============================================================================
-# TRAVEL TIME CALCULATION
-# =============================================================================
-
-def calculate_travel_time(origin_cfg, dest_lat, dest_lng, airports, routes):
-    """
-    Calculate total travel time from origin to destination.
-
-    Returns: (total_minutes, route_info) or (None, None) if unreachable
-    """
-    best_time = float('inf')
-    best_route = None
-
-    # find nearest airports to destination
-    dest_airports = []
-    for code, airport in airports.items():
-        dist = haversine_km(dest_lat, dest_lng, airport["lat"], airport["lng"])
-        if dist < WATER_SKIP_DISTANCE_KM:
-            dest_airports.append((code, airport, dist))
-
-    # sort by distance, take top 5
-    dest_airports.sort(key=lambda x: x[2])
-    dest_airports = dest_airports[:5]
-
-    if not dest_airports:
-        return None, None  # no nearby airports = water/remote
-
-    # try each origin airport -> dest airport combination
-    for origin_apt in origin_cfg["airports"]:
-        origin_code = origin_apt["code"]
-        ground_to_origin = origin_apt["ground_min"]
-
-        # get routes from this origin
-        origin_routes = routes.get(origin_code, [])
-
-        for dest_code, dest_apt, ground_from_dest_km in dest_airports:
-            # check if direct route exists
-            if dest_code in origin_routes:
-                # calculate flight time
-                flight_dist = haversine_km(
-                    airports[origin_code]["lat"], airports[origin_code]["lng"],
-                    dest_apt["lat"], dest_apt["lng"]
-                )
-                flight_time = estimate_flight_time(flight_dist)
-
-                # determine if international
-                origin_country = airports.get(origin_code, {}).get("country", "")
-                dest_country = dest_apt.get("country", "")
-                arrival_overhead = ARRIVAL_OVERHEAD_INTL if origin_country != dest_country else ARRIVAL_OVERHEAD_DOMESTIC
-
-                # ground time from dest airport to final destination
-                ground_from_dest = estimate_ground_time(ground_from_dest_km)
-
-                # total time
-                total = ground_to_origin + DEPARTURE_OVERHEAD + flight_time + arrival_overhead + ground_from_dest
-
-                if total < best_time:
-                    best_time = total
-                    best_route = {
-                        "origin_airport": origin_code,
-                        "dest_airport": dest_code,
-                        "is_direct": True,
-                        "ground_to": ground_to_origin,
-                        "overhead": DEPARTURE_OVERHEAD,
-                        "flight": flight_time,
-                        "arrival": arrival_overhead,
-                        "ground_from": ground_from_dest,
-                    }
-
-    if best_time == float('inf'):
-        return None, None
-
-    return best_time, best_route
+def estimate_ground_minutes(dist_km, speed_kph=DEFAULT_GROUND_KPH):
+    return round((dist_km / speed_kph) * 60)
 
 
 # =============================================================================
@@ -202,46 +86,127 @@ def calculate_travel_time(origin_cfg, dest_lat, dest_lng, airports, routes):
 # =============================================================================
 
 def get_h3_cells_global(res):
-    """Get ALL H3 cells at a given resolution (for low res only)."""
+    """all H3 cells at a given resolution"""
     base_cells = h3.get_res0_cells()
-
     if res == 0:
         return list(base_cells)
-
     all_cells = []
     for base in base_cells:
-        children = h3.cell_to_children(base, res)
-        all_cells.extend(children)
-
+        all_cells.extend(h3.cell_to_children(base, res))
     return all_cells
 
 
-def get_h3_cells_bounded(res, center_lat, center_lng, radius_km):
+# =============================================================================
+# SPATIAL INDEX
+# =============================================================================
+
+def build_airport_spatial_index(best_times, airports, index_res=2):
     """
-    Get H3 cells within radius_km of center point.
-    Uses h3.grid_disk to expand from center.
+    bucket reachable airports into h3 res-2 cells for fast lookup.
+    instead of checking all ~3k airports per cell, we only check
+    airports in nearby h3-res2 buckets (~50-100 per cell).
     """
-    # get center cell at target resolution
-    center_cell = h3.latlng_to_cell(center_lat, center_lng, res)
+    index = {}  # h3_res2_cell -> [(code, lat, lng, airport_result)]
+    for code, result in best_times.items():
+        apt = airports.get(code)
+        if not apt:
+            continue
+        try:
+            bucket = h3.latlng_to_cell(apt['lat'], apt['lng'], index_res)
+        except Exception:
+            continue
+        if bucket not in index:
+            index[bucket] = []
+        index[bucket].append((code, apt['lat'], apt['lng'], result))
 
-    # estimate number of rings needed
-    # cell edge length varies by resolution
-    edge_lengths_km = {
-        0: 1107.71, 1: 418.68, 2: 158.24, 3: 59.81,
-        4: 22.61, 5: 8.54, 6: 3.23
-    }
-    edge_km = edge_lengths_km.get(res, 10)
-    rings = int(radius_km / edge_km) + 1
-
-    # get disk of cells
-    cells = h3.grid_disk(center_cell, rings)
-    return list(cells)
+    print(f"  spatial index: {len(index)} buckets, {sum(len(v) for v in index.values())} entries")
+    return index
 
 
-def cell_to_lat_lng(cell):
-    """convert h3 cell to lat/lng"""
-    lat, lng = h3.cell_to_latlng(cell)
-    return lat, lng
+def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
+                    index_res=2, k_rings=3):
+    """
+    find best route to cell at (lat, lng) using spatial index.
+    returns (total_minutes, route_info) or (None, None).
+    """
+    # check nearby buckets
+    try:
+        center_bucket = h3.latlng_to_cell(lat, lng, index_res)
+    except Exception:
+        return None, None
+
+    nearby_buckets = h3.grid_disk(center_bucket, k_rings)
+
+    # collect candidate airports from nearby buckets
+    best_total = float('inf')
+    best_info = None
+
+    for bucket in nearby_buckets:
+        for code, apt_lat, apt_lng, result in spatial_index.get(bucket, []):
+            dist_km = haversine_km(lat, lng, apt_lat, apt_lng)
+            if dist_km > MAX_GROUND_KM:
+                continue
+
+            ground_from = estimate_ground_minutes(dist_km)
+
+            # arrival overhead (international vs domestic)
+            origin_country = airports.get(result.origin_airport, {}).get('country', '')
+            dest_country = airports.get(code, {}).get('country', '')
+            arrival = 60 if origin_country != dest_country else 30
+
+            total = result.total_time + ground_from + arrival
+
+            if total < best_total:
+                best_total = total
+
+                # decompose the dijkstra result for tooltip breakdown
+                # result.total_time = ground_to + overhead(90) + flights + stops*(90+30)
+                origin_ground = next(
+                    (a['ground_time'] for a in origin_cfg['airports']
+                     if a['code'] == result.origin_airport), 0
+                )
+                overhead = 90
+                connection_cost = result.stops * (90 + 30)
+                flights_only = result.total_time - origin_ground - overhead - connection_cost
+
+                best_info = {
+                    "origin_airport": result.origin_airport,
+                    "dest_airport": code,
+                    "is_direct": result.stops == 0,
+                    "stops": result.stops,
+                    "path": result.path,
+                    "ground_to": origin_ground,
+                    "overhead": overhead,
+                    "flight": max(0, flights_only),  # guard against rounding
+                    "connections": connection_cost,
+                    "arrival": arrival,
+                    "ground_from": ground_from,
+                }
+
+    if best_total == float('inf'):
+        return None, None
+
+    # also check drive-only for nearby destinations
+    origin_coords = origin_cfg['coords']  # (lng, lat) tuple
+    drive_dist = haversine_km(lat, lng, origin_coords[1], origin_coords[0])
+    if drive_dist < MAX_GROUND_KM:
+        drive_time = estimate_ground_minutes(drive_dist)
+        if drive_time < best_total:
+            return drive_time, {
+                "origin_airport": "drive",
+                "dest_airport": "drive",
+                "is_direct": True,
+                "stops": -1,
+                "path": ["drive"],
+                "ground_to": drive_time,
+                "overhead": 0,
+                "flight": 0,
+                "connections": 0,
+                "arrival": 0,
+                "ground_from": 0,
+            }
+
+    return best_total, best_info
 
 
 # =============================================================================
@@ -249,25 +214,51 @@ def cell_to_lat_lng(cell):
 # =============================================================================
 
 def precompute_origin(origin_name, airports, routes):
-    """Pre-compute isochrone data for a single origin."""
+    """pre-compute isochrone data using dijkstra routing."""
 
-    if origin_name not in ORIGINS:
+    if origin_name not in DJ_ORIGINS:
         print(f"unknown origin: {origin_name}")
-        print(f"available: {list(ORIGINS.keys())}")
+        print(f"available: {list(DJ_ORIGINS.keys())}")
         return None
 
-    origin_cfg = ORIGINS[origin_name]
+    origin_cfg = DJ_ORIGINS[origin_name]
     print(f"\n{'='*60}")
     print(f"pre-computing isochrone for {origin_cfg['name']}")
-    print(f"{'='*60}\n")
+    print(f"{'='*60}")
 
+    # step 1: run dijkstra (once)
+    print("\nrunning dijkstra...")
+    t0 = time.time()
+    graph = FlightGraph(routes, airports)
+    router = DijkstraRouter(graph, airports, origin_name)
+    best_times = router.run()
+    dijkstra_time = time.time() - t0
+
+    # stats
+    by_stops = {}
+    for r in best_times.values():
+        by_stops[r.stops] = by_stops.get(r.stops, 0) + 1
+    print(f"  dijkstra done in {dijkstra_time:.1f}s: {len(best_times)} airports reachable")
+    print(f"  direct={by_stops.get(0,0)}, 1-stop={by_stops.get(1,0)}, 2-stop={by_stops.get(2,0)}")
+
+    # step 2: build spatial index of reachable airports
+    print("\nbuilding spatial index...")
+    spatial_index = build_airport_spatial_index(best_times, airports)
+
+    # step 3: iterate cells at each resolution
     result = {
         "origin": origin_name,
         "origin_name": origin_cfg["name"],
-        "origin_coords": origin_cfg["coords"],
+        "origin_coords": list(origin_cfg["coords"]),
         "computed": datetime.now().isoformat(),
+        "routing": "dijkstra",
+        "airports_reachable": len(best_times),
         "resolutions": {}
     }
+
+    total_computed = 0
+    total_skipped = 0
+    total_time_all = time.time()
 
     for res in RESOLUTIONS:
         print(f"\nresolution {res}...")
@@ -281,6 +272,7 @@ def precompute_origin(origin_name, airports, routes):
         skipped = 0
 
         for i, cell in enumerate(cells):
+            # progress
             if i % 10000 == 0 and i > 0:
                 pct = i / len(cells) * 100
                 elapsed = time.time() - start
@@ -288,17 +280,26 @@ def precompute_origin(origin_name, airports, routes):
                 eta = (len(cells) - i) / rate
                 print(f"  {pct:.1f}% ({i:,}/{len(cells):,}) - {rate:.0f} cells/s - eta {eta:.0f}s")
 
-            lat, lng = cell_to_lat_lng(cell)
+            lat, lng = h3.cell_to_latlng(cell)
 
-            travel_time, route = calculate_travel_time(
-                origin_cfg, lat, lng, airports, routes
+            travel_time, route = query_cell_fast(
+                lat, lng, spatial_index, airports, origin_cfg
             )
 
             if travel_time is not None:
-                res_data[cell] = {
-                    "time": travel_time,
-                    "route": route
-                }
+                # compact format to keep file <10 MB:
+                # t=time, o=origin airport, a=dest airport, s=stops
+                # breakdown is derived client-side from airport data
+                if route and route.get("stops", 0) == -1:
+                    # drive-only cell
+                    res_data[cell] = {"t": travel_time, "d": 1}
+                else:
+                    res_data[cell] = {
+                        "t": travel_time,
+                        "o": route["origin_airport"],
+                        "a": route["dest_airport"],
+                        "s": route["stops"],
+                    }
                 computed += 1
             else:
                 skipped += 1
@@ -307,25 +308,29 @@ def precompute_origin(origin_name, airports, routes):
         print(f"  done in {elapsed:.1f}s: {computed:,} computed, {skipped:,} skipped")
 
         result["resolutions"][str(res)] = res_data
+        total_computed += computed
+        total_skipped += skipped
+
+    total_elapsed = time.time() - total_time_all
+    print(f"\ntotal: {total_computed:,} cells in {total_elapsed:.1f}s ({total_skipped:,} skipped)")
+    print(f"  dijkstra: {dijkstra_time:.1f}s")
+    print(f"  cell iteration: {total_elapsed - dijkstra_time:.1f}s")
 
     return result
 
 
 def save_result(origin_name, data):
-    """Save precomputed data to JSON file."""
+    """save precomputed data to JSON."""
     out_dir = Path(__file__).parent.parent / "data" / "isochrones"
     out_dir.mkdir(exist_ok=True)
-
     out_path = out_dir / f"{origin_name}.json"
 
     print(f"\nsaving to {out_path}...")
     with open(out_path, "w") as f:
-        json.dump(data, f)  # no indent for smaller file
+        json.dump(data, f)
 
-    # get file size
     size_mb = out_path.stat().st_size / 1024 / 1024
     print(f"saved {size_mb:.1f} MB")
-
     return out_path
 
 
@@ -334,7 +339,7 @@ def save_result(origin_name, data):
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="Pre-compute isochrone data")
+    parser = argparse.ArgumentParser(description="Pre-compute isochrone data (dijkstra)")
     parser.add_argument("origin", nargs="?", default="bristol",
                         help="Origin city to compute (default: bristol)")
     parser.add_argument("--all", action="store_true",
@@ -346,7 +351,7 @@ def main():
     routes = load_routes()
     print(f"  {len(airports):,} airports, {sum(len(v) for v in routes.values()):,} routes")
 
-    origins_to_compute = list(ORIGINS.keys()) if args.all else [args.origin]
+    origins_to_compute = list(DJ_ORIGINS.keys()) if args.all else [args.origin]
 
     for origin in origins_to_compute:
         data = precompute_origin(origin, airports, routes)
