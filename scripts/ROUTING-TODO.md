@@ -4,16 +4,19 @@
 
 ## current state
 
-dijkstra router is working correctly:
+dijkstra router is working and fully integrated:
 - multi-source bounded-stops shortest path from bristol
 - correctly selects origin airport (BRS direct when available, else LHR)
 - circuity filter prevents absurd routes
-- 3192 airports reachable with 2-stop cap
+- 3139 airports reachable with 2-stop cap
+- **integrated into precompute-isochrone.py** — runs dijkstra, builds spatial index, outputs compact JSON
+- **UI loads precomputed data** — `parseCellData()` in isochrone.html derives breakdown client-side
+- precompute: 10.7s for res 1-4, 143k cells, 8.7 MB
 
 **known limitations:**
 1. flight times estimated from distance (not actual schedules)
 2. ground transport hardcoded for bristol only
-3. no UI integration yet - python precompute only
+3. res 5+ not precomputed (2M+ cells, file size constraint)
 
 ## priority order
 
@@ -28,28 +31,13 @@ approach:
 - run periodically (monthly?) - schedules don't change often
 - fallback to distance estimation for missing pairs
 
-### 2. export precomputed times for UI (high value, low effort)
+### ~~2. export precomputed times for UI~~ — DONE
 
-run dijkstra once per origin, export to `data/airport_times_{origin}.json`. UI just does nearest-airport lookup instead of computing routes.
+dijkstra runs inside `precompute-isochrone.py`, outputs compact JSON per H3 cell to `data/isochrones/{origin}.json`. format: `{t, o, a, s}` (time, origin airport, dest airport, stops).
 
-format:
-```json
-{
-  "origin": "bristol",
-  "computed": "2026-01-28",
-  "airports": {
-    "JFK": {"time": 702, "stops": 0, "path": ["LHR", "JFK"]},
-    ...
-  }
-}
-```
+### ~~3. wire precomputed times into isochrone.html~~ — DONE
 
-### 3. wire precomputed times into isochrone.html (high value, medium effort)
-
-replace the buggy per-cell routing with:
-1. load `airport_times_{origin}.json` on origin change
-2. cell query = find k nearest airports, add ground time, pick min
-3. much faster + correct
+`parseCellData()` in isochrone.html reads compact format, derives full breakdown client-side. `generateHexGridDirect()` renders precomputed cells directly (no grid iteration for res 1-4).
 
 ### 4. ground transport improvements (medium value, high effort)
 
@@ -74,9 +62,11 @@ london, NYC, LA, tokyo, singapore, dubai - cover major population centers. each 
 
 ## files to know
 
-- `scripts/dijkstra_router.py` - main routing algorithm
+- `scripts/dijkstra_router.py` - core routing algorithm (FlightGraph + DijkstraRouter)
+- `scripts/precompute-isochrone.py` - runs dijkstra, outputs compact JSON per origin
 - `scripts/crawl-amadeus.py` - route data crawler (extend for flight times)
 - `scripts/ROUTING.md` - algorithm documentation
-- `isochrone.html` - UI (needs integration with precomputed times)
+- `isochrone.html` - UI, renders precomputed JSON via parseCellData()
+- `data/isochrones/*.json` - precomputed output (8.7 MB for bristol, 143k cells)
 - `data/routes.json` - connectivity only, no times
 - `data/airports.json` - airport coords and metadata

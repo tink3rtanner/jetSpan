@@ -16,6 +16,8 @@ This session implemented a real data pipeline for the flight isochrone visualiza
 | `merge-routes.py` | Merges Amadeus + OpenFlights for best coverage | Done - 58k routes |
 | `compute-ground-times.py` | Computes OSRM driving times to H3 cells | Partial - 3 airports tested |
 | `sanity-checks.py` | Validates all data files | Done |
+| `dijkstra_router.py` | One-to-all shortest path routing | Done - 3139 airports from Bristol |
+| `precompute-isochrone.py` | Generates pre-computed isochrone JSON | Done - 143k cells, 8.7 MB |
 
 ### Data Files (`data/`)
 
@@ -54,9 +56,11 @@ This session implemented a real data pipeline for the flight isochrone visualiza
 6. **Early exit** - Stop searching when route < 4 hours found
 
 ### Current Performance
-- First render: ~28s for 40k cells (0.69ms/cell)
-- Cached render: ~0.4s for 40k cells (cache hit)
+- **Pre-computed res 1-4**: <100ms direct render (143k cells from JSON)
+- **On-demand res 5-6**: 1-3s (grid iteration, only when zoomed in)
+- **Dijkstra precompute**: 10.7s for all 4 resolutions (was 18 min with per-cell routing)
 - Spatial index build: 12ms
+- Legacy: first render was ~28s for 40k cells before precompute
 
 ## Integration Points in isochrone.html
 
@@ -78,27 +82,32 @@ async function loadGroundData(region)  // lazy loads ground data
 
 ## Known Issues
 
-1. **Stats panel shows old data** - displays hardcoded 81 airports instead of loaded 4518
-2. **Bristol→London seems slow** - showing 2-4h, should be <2h
-3. **Water cells computed** - wastes time computing travel to ocean
-4. **Far destinations look same** - color bands don't differentiate 10h vs 20h well
+1. **Display coarseness** - res 4 cells are visible at medium zoom, some discontinuities
+2. **Far destinations look same** - color bands don't differentiate 10h vs 20h well
+3. **Flight times estimated** - distance-based, not actual schedules (~10-15% error)
+4. **Bristol only** - precomputed data exists only for bristol origin so far
 
 ## Remaining Tasks
 
 ### High Priority
-1. **Skip water cells** - check if cell centroid is water, skip computation
-2. **Pre-compute on load** - compute all res 2-3 cells upfront for instant panning
+1. **Higher-res rendering** - per-resolution file splitting, zoom threshold tuning, possibly selective res 5
+2. **Strip on-demand fallback** - once fully precomputed, remove grid iteration code from isochrone.html
 3. **Run full OSRM computation** - ~50 hours on Pi overnight
+4. **Crawl actual flight times** - amadeus flight offers API for real durations
 
 ### UI Improvements
-1. **Collapse controls** - put settings behind (i) button
-2. **Color distribution** - add config for better differentiation of distant places (10-16+ hours)
-3. **Fix stats panel** - show loaded data counts
+1. **Color distribution** - add config for better differentiation of distant places (10-16+ hours)
+2. **Collapse controls** - put settings behind (i) button
 
 ### Future
-1. **Ship pre-computed JSON** - `data/isochrones/bristol.json` etc. for zero runtime computation
-2. **Web Workers** - offload computation to background thread
-3. **Hub routing** - 1-stop connections via major hubs
+1. **More origin cities** - run precompute per origin, add to UI dropdown
+2. **Web Workers** - offload computation to background thread (only matters if on-demand code stays)
+
+### Done
+- ~~Skip water cells~~ — spatial index skips cells >400km from any airport
+- ~~Pre-compute on load~~ — res 1-4 pre-computed, direct rendering
+- ~~Ship pre-computed JSON~~ — `data/isochrones/bristol.json` (8.7 MB, 143k cells)
+- ~~Hub routing~~ — dijkstra with bounded stops (direct + 1-stop + 2-stop)
 
 ## API Credentials
 
@@ -132,13 +141,17 @@ python3 scripts/compute-ground-times.py
 
 ```
 jetspan/
-  isochrone.html          # main visualization (modified)
+  isochrone.html          # main visualization
   data/
     airports.json         # 4518 airports
     routes.json           # 58k routes
+    isochrones/
+      bristol.json        # precomputed isochrone (8.7 MB, 143k cells)
     ground/
       europe.json         # test ground data (3 airports)
   scripts/
+    dijkstra_router.py    # core routing algorithm
+    precompute-isochrone.py # generates isochrone JSON
     fetch-airports.py
     fetch-openflights.py
     crawl-amadeus.py
@@ -152,6 +165,4 @@ jetspan/
 
 ## Key Insight
 
-The main performance bottleneck is computing travel times for each cell. With 40k cells and complex routing logic, this takes ~30s. The cache helps on re-renders but first render is slow.
-
-**Best solution**: Pre-compute travel times as static JSON per origin city. Then runtime is just JSON lookup - instant.
+Pre-computing travel times as static JSON per origin city was the right call. dijkstra + spatial index precompute runs in 10.7s (was 18 min), produces 143k cells. runtime is just JSON lookup — instant (<100ms for any zoom level at res 1-4).

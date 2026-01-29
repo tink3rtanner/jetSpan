@@ -110,23 +110,27 @@ perfTests.exportJSON();  // Export for comparison
 
 ### Pre-computed Isochrones (IMPLEMENTED)
 
-Pre-compute travel times as static JSON per origin city.
+Pre-compute travel times as static JSON per origin city using dijkstra routing.
 
 ```
-data/isochrones/bristol.json  (0.5 MB, 2738 cells)
+data/isochrones/bristol.json  (8.7 MB, 143,077 cells)
 {
   "origin": "bristol",
   "resolutions": {
-    "1": { "h3index": {"time": 180, "route": {...}}, ... },  // 46 cells
-    "2": { ... },  // 344 cells
-    "3": { ... }   // 2348 cells
+    "1": { "h3index": {"t": 180, "o": "BRS", "a": "JFK", "s": 0}, ... },
+    "2": { ... },
+    "3": { ... },
+    "4": { ... }
   }
 }
 ```
 
+Compact format `{t, o, a, s}` = time, origin airport, dest airport, stops.
+Breakdown derived client-side by `parseCellData()`.
+
 **Actual Impact**:
 - With grid iteration lookup: No improvement (still iterating all viewport cells)
-- With direct rendering (hybrid): ~100x speedup for res 1-3
+- With direct rendering (hybrid): ~100x speedup for res 1-4
 
 ### Web Workers (Priority: Medium)
 
@@ -168,13 +172,10 @@ Less important now that res 1-3 are fast via direct rendering.
 
 ## Session Notes (2026-01-28 late)
 
-### Pre-compute Expansion (res 1-4)
+### Pre-compute Expansion (res 1-4, per-cell routing)
 
-Extended pre-compute from res 1-3 to res 1-4:
-- **res 5 skipped** - 2M+ cells globally, takes 60+ min to compute, diminishing returns
-- **res 4 added** - covers zoom 4-5.5, good detail for regional views
+Initial expansion from res 1-3 to res 1-4 using per-cell routing (before dijkstra):
 
-**Compute times (Bristol origin):**
 | Resolution | Global cells | Computed | Skipped | Time |
 |------------|-------------|----------|---------|------|
 | 1 | 842 | 46 | 796 | 2.9s |
@@ -182,26 +183,51 @@ Extended pre-compute from res 1-3 to res 1-4:
 | 3 | 41,162 | 2,348 | 38,814 | 137.5s |
 | 4 | 288,122 | 16,252 | 271,870 | 934.2s |
 
-**Total:** 18 min compute, **3.5 MB** file, **18,990 cells**
+**Total:** 18 min compute, **3.5 MB** file, **18,990 cells** (direct flights only)
 
-### Code Changes
+---
 
-1. **precompute-isochrone.py** - RESOLUTIONS = [1, 2, 3, 4]
-2. **isochrone.html** - resolution <= 4 for direct rendering
-3. **routing fix** (by other agent) - removed fake flight estimates, only real routes
+## 2026-01-29 - Dijkstra Integration
 
-### Hybrid Architecture
+### Precompute with Dijkstra Routing
 
-```
-zoom 0-4:   res 1-4 → direct render from pre-computed JSON (instant)
-zoom 4.5+:  res 5-6 → grid iteration with on-demand compute (~1-3s)
-```
+Rewrote `precompute-isochrone.py` to use `dijkstra_router.py` directly:
+- dijkstra runs once (0.3s), builds spatial index of 3139 reachable airports
+- per-cell lookup via h3 res-2 spatial buckets (~50 airports checked per cell vs ~3k)
+- multi-stop connections: 338 direct + 2156 one-stop + 645 two-stop
 
-### Next Steps
+| Resolution | Global cells | Computed | Skipped | Time |
+|------------|-------------|----------|---------|------|
+| 1 | 842 | 355 | 487 | 0.1s |
+| 2 | 5,882 | 2,500 | 3,382 | 0.5s |
+| 3 | 41,162 | 17,515 | 23,647 | 2.6s |
+| 4 | 288,122 | 122,707 | 165,415 | 7.2s |
 
-- [ ] Pre-compute finishes, test UI performance
-- [ ] Integrate dijkstra router (other agent's work)
-- [ ] Consider per-origin pre-compute for multiple cities
+**Total:** 10.7s compute, **8.7 MB** file, **143,077 cells**
+
+### Improvement vs Per-Cell Routing
+
+| Metric | Per-cell (old) | Dijkstra (new) | Change |
+|--------|---------------|----------------|--------|
+| Compute time | 18 min | 10.7s | **100x faster** |
+| Cells computed | 18,990 | 143,077 | **7.5x more** |
+| Airports reachable | ~375 (direct) | 3,139 (multi-stop) | **8.4x more** |
+| File size | 3.5 MB | 8.7 MB | 2.5x (compact format) |
+
+### Compact JSON Format
+
+To keep file under 10 MB, switched from verbose to compact format:
+- Verbose: `{time, route: {originAirport, destAirport, isDirect, ...}}` — 35.6 MB
+- Compact: `{t, o, a, s}` (time, origin airport, dest airport, stops) — 8.7 MB
+- Drive-only cells: `{t, d: 1}`
+- Breakdown derived client-side by `parseCellData()` in isochrone.html
+
+### UI Render Performance (Chrome verified)
+
+| Resolution | Cells rendered | Render time |
+|------------|---------------|-------------|
+| res 3 (continental) | 17,515 | 56ms |
+| res 4 (regional) | 9,759 visible | 84ms |
 
 ---
 
@@ -230,71 +256,63 @@ Pre-computed isochrone data is now generated and loaded:
 | Globe z0.8 | 15.8s | 19.2s | No improvement |
 | z1.5 | 19.0s | 21.0s | No improvement |
 
-### 2026-01-28 - Hybrid Direct Rendering (CURRENT)
+### 2026-01-28 - Hybrid Direct Rendering
 
-**Implementation**: Direct render pre-computed cells for res 1-3, skip grid iteration entirely.
+**Implementation**: Direct render pre-computed cells for res 1-4, skip grid iteration entirely.
 
 | Resolution | Cells | Before (grid) | After (direct) | Speedup |
 |------------|-------|---------------|----------------|---------|
-| res 1 (globe) | 46 | 15.8s | **0ms** | ∞ |
-| res 2 (continental) | 344 | 19.0s | **2ms** | 9500x |
-| res 3 (regional) | 2348 | 31.3s | **11ms** | 2845x |
+| res 1 (globe) | 355 | 15.8s | **<1ms** | ∞ |
+| res 2 (continental) | 2,500 | 19.0s | **~5ms** | ~4000x |
+| res 3 (regional) | 17,515 | 31.3s | **56ms** | ~560x |
+| res 4 (regional) | 122,707 | N/A | **84ms** | N/A |
 
-**Key insight**: The bottleneck was grid iteration, not computation. By iterating only pre-computed cells (~2700) instead of all viewport cells (~15k+), we eliminate the overhead entirely.
+**Key insight**: The bottleneck was grid iteration, not computation. By iterating only pre-computed cells instead of all viewport cells, we eliminate the overhead entirely.
 
-### Why Limited Benefit?
+### Historical Note: Why Grid Iteration Was Slow
 
-The pre-computed data IS being used, but benefits are limited because:
+The initial approach (grid iteration with pre-computed lookup) showed no improvement because:
+1. Code still iterated ALL viewport cells to check against pre-computed data
+2. Most cells are water/unreachable and get skipped anyway
+3. Water skip optimization was already quick
 
-1. **Grid iteration overhead**: The code still iterates through ALL cells in the viewport to check if they exist in pre-computed data
-2. **Most cells are water**: At res 1, only 46 of 842 cells have data (5.5%). The rest are water/unreachable and get skipped anyway
-3. **Water skip is already fast**: The "water skip" optimization (>300km from airport) is very quick, so pre-computed lookup doesn't save much
-
-### Architectural Improvements Needed
-
-To fully benefit from pre-computed data:
-
-1. **Direct rendering**: Render pre-computed cells directly without grid iteration
-2. **Resolution-aware loading**: Only load pre-computed data for current resolution
-3. **Tile-based approach**: Pre-compute in tiles, load tiles as needed
-4. **Higher resolution**: Pre-compute res 4-6 for local views (requires bounded computation)
+**Solution (implemented)**: Direct rendering — iterate only pre-computed cells, skip grid iteration entirely. Combined with dijkstra routing for 7.5x more cell coverage.
 
 ### Current Architecture (Hybrid - Implemented)
 
 ```
-HYBRID RENDERING APPROACH
-=========================
+HYBRID RENDERING APPROACH (updated 2026-01-29)
+===============================================
 
-res 1-3 (zoomed out, globe/continental):
-  1. Load pre-computed cells for resolution
+res 1-4 (zoomed out, globe/continental/regional):
+  1. Load pre-computed cells for resolution (dijkstra + compact JSON)
   2. Filter to viewport bounds
   3. Render directly (no grid iteration)
-  -> O(pre-computed cells) = ~2700 total
-  -> Expected: <100ms
+  -> O(pre-computed cells) = ~143k total across 4 resolutions
+  -> Actual: <100ms
 
-res 4-6 (zoomed in, local views):
+res 5-6 (zoomed in, local views):
   1. Iterate cells in viewport grid
   2. For each cell:
      a. Check cache
-     b. Water skip (>300km from airport)
+     b. Water skip (>400km from airport)
      c. Compute on-demand
   -> O(viewport cells) but viewport is smaller when zoomed in
   -> Acceptable: few seconds
 
 WHY HYBRID?
 - Grid iteration is slow because we check ALL viewport cells
-- Pre-computed data only covers res 1-3 (~48k cells globally)
-- Res 4-6 would require millions of cells to pre-compute
+- Pre-computed data covers res 1-4 (~143k cells globally, 8.7 MB)
+- Res 5 would require 2M+ cells, ~52 MB — needs file splitting or selective compute
 - When zoomed in, viewport has fewer cells anyway so grid iteration is tolerable
-- The pain point (15-30s renders) is specifically at low zoom (res 1-3)
 ```
 
 ### Trade-offs
 
 | Approach | Pros | Cons |
 |----------|------|------|
-| Direct render (res 1-3) | Near-instant, no iteration | Only shows pre-computed cells |
-| Grid iteration (res 4+) | Gap-free coverage, dynamic | Slow for large viewports |
+| Direct render (res 1-4) | Near-instant, no iteration | Only shows pre-computed cells |
+| Grid iteration (res 5+) | Gap-free coverage, dynamic | Slow for large viewports |
 
 **What you lose with direct rendering:**
 - Cells not in pre-computed set won't render (gaps if bugs in pre-compute)
@@ -304,4 +322,4 @@ WHY HYBRID?
 **What you gain:**
 - 100x+ speedup for zoomed-out views (15s → <100ms)
 - Predictable performance
-- Eliminates grid iteration overhead entirely for low res
+- Eliminates grid iteration overhead entirely for res 1-4
