@@ -177,12 +177,12 @@ Extended pre-compute from res 1-3 to res 1-4:
 **Compute times (Bristol origin):**
 | Resolution | Global cells | Computed | Skipped | Time |
 |------------|-------------|----------|---------|------|
-| 1 | 842 | 46 | 796 | ~3s |
-| 2 | 5,882 | 344 | 5,538 | ~20s |
-| 3 | 41,162 | ~2,348 | ~38k | ~2.5 min |
-| 4 | 288,122 | TBD | TBD | ~10 min est |
+| 1 | 842 | 46 | 796 | 2.9s |
+| 2 | 5,882 | 344 | 5,538 | 19.9s |
+| 3 | 41,162 | 2,348 | 38,814 | 137.5s |
+| 4 | 288,122 | 16,252 | 271,870 | 934.2s |
 
-**Total expected:** ~15 min compute, ~2-5 MB file
+**Total:** 18 min compute, **3.5 MB** file, **18,990 cells**
 
 ### Code Changes
 
