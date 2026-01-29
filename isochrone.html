@@ -33,59 +33,98 @@
       height: 100%;
     }
 
-    /* Control panel */
-    .control-panel {
+    /* Title panel (top left) */
+    .title-panel {
       position: absolute;
       top: 16px;
       left: 16px;
       background: rgba(10, 10, 10, 0.9);
       backdrop-filter: blur(10px);
       border-radius: 12px;
-      padding: 16px;
+      padding: 14px 18px;
       z-index: 100;
-      min-width: 280px;
       border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
-    .control-panel h1 {
+    .title-panel h1 {
       font-size: 18px;
       font-weight: 600;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
-    .control-panel .subtitle {
+    .title-panel .subtitle {
       font-size: 12px;
       color: #888;
-      margin-bottom: 16px;
     }
 
-    .control-group {
-      margin-bottom: 16px;
+    /* Info button (top right) */
+    .info-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 36px;
+      height: 36px;
+      background: rgba(10, 10, 10, 0.9);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 50%;
+      color: #888;
+      font-size: 18px;
+      cursor: pointer;
+      z-index: 101;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+      padding: 0;
+      line-height: 1;
     }
 
-    .control-group label {
+    .info-btn:hover,
+    .info-btn.active {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    /* Info panel (slides down from top right) */
+    .info-panel {
+      position: absolute;
+      top: 60px;
+      right: 16px;
+      background: rgba(10, 10, 10, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 16px;
+      z-index: 100;
+      min-width: 240px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      display: none;
+    }
+
+    .info-panel.visible {
       display: block;
-      font-size: 12px;
+    }
+
+    .info-section {
+      margin-bottom: 16px;
+    }
+
+    .info-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .info-section-label {
+      font-size: 11px;
       font-weight: 500;
-      color: #888;
-      margin-bottom: 6px;
+      color: #666;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      margin-bottom: 10px;
     }
 
-    .control-group select {
-      width: 100%;
-      padding: 10px 12px;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      color: #fff;
-      font-size: 14px;
-      cursor: pointer;
-    }
-
-    .control-group select:hover {
-      background: rgba(255, 255, 255, 0.15);
+    .info-stats {
+      display: flex;
+      gap: 20px;
     }
 
     .toggle-row {
@@ -148,45 +187,6 @@
       transform: translateX(18px);
     }
 
-    /* Settings toggle button */
-    .settings-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: pointer;
-      padding: 4px 0;
-      margin-bottom: 8px;
-    }
-
-    .settings-header:hover {
-      opacity: 0.8;
-    }
-
-    .settings-toggle {
-      width: 24px;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 50%;
-      font-size: 14px;
-      transition: transform 0.2s;
-    }
-
-    .settings-toggle.expanded {
-      transform: rotate(180deg);
-    }
-
-    .settings-content {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.3s ease;
-    }
-
-    .settings-content.expanded {
-      max-height: 200px;
-    }
 
     /* Legend */
     .legend {
@@ -337,21 +337,6 @@
       color: #888;
     }
 
-    /* Stats bar */
-    .stats-bar {
-      position: absolute;
-      top: 16px;
-      right: 16px;
-      background: rgba(10, 10, 10, 0.9);
-      backdrop-filter: blur(10px);
-      border-radius: 12px;
-      padding: 12px 16px;
-      z-index: 100;
-      display: flex;
-      gap: 24px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
     .stat {
       text-align: center;
     }
@@ -372,43 +357,49 @@
 <body>
   <div id="map"></div>
 
-  <!-- Control Panel -->
-  <div class="control-panel">
+  <!-- Title (top left) -->
+  <div class="title-panel">
     <h1>Flight Isochrone Map</h1>
-    <p class="subtitle">Multimodal travel times from your origin</p>
+    <p class="subtitle">Multimodal travel times from Bristol, UK</p>
+  </div>
 
-    <div class="control-group">
-      <label>Origin</label>
-      <select id="origin-select">
-        <option value="bristol">Bristol, UK</option>
-        <option value="london">London, UK</option>
-        <option value="newyork">New York, USA</option>
-        <option value="paris">Paris, France</option>
-        <option value="tokyo">Tokyo, Japan</option>
-        <option value="sydney">Sydney, Australia</option>
-      </select>
-    </div>
+  <!-- Info toggle button (top right) -->
+  <button class="info-btn" id="info-btn" onclick="toggleInfoPanel()">ⓘ</button>
 
-    <div class="control-group">
-      <div class="settings-header" onclick="toggleSettings()">
-        <label style="cursor: pointer; margin-bottom: 0;">Display Options</label>
-        <div class="settings-toggle" id="settings-toggle">▼</div>
+  <!-- Info panel (hidden by default) -->
+  <div class="info-panel" id="info-panel">
+    <div class="info-section">
+      <div class="info-section-label">Stats</div>
+      <div class="info-stats">
+        <div class="stat">
+          <div class="stat-value" id="stat-cells">0</div>
+          <div class="stat-label">Cells</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="stat-zoom">0</div>
+          <div class="stat-label">Zoom</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="stat-res">0</div>
+          <div class="stat-label">H3 Res</div>
+        </div>
       </div>
-      <div class="settings-content" id="settings-content">
-        <div class="toggle-row">
-          <span>Show airports</span>
-          <label class="toggle-switch">
-            <input type="checkbox" id="toggle-airports" checked>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="toggle-row">
-          <span>Show hex grid</span>
-          <label class="toggle-switch">
-            <input type="checkbox" id="toggle-grid" checked>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
+    </div>
+    <div class="info-section">
+      <div class="info-section-label">Display Options</div>
+      <div class="toggle-row">
+        <span>Show airports</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-airports" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span>Show hex grid</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-grid" checked>
+          <span class="toggle-slider"></span>
+        </label>
       </div>
     </div>
   </div>
@@ -457,21 +448,6 @@
     </div>
   </div>
 
-  <!-- Stats bar -->
-  <div class="stats-bar">
-    <div class="stat">
-      <div class="stat-value" id="stat-cells">0</div>
-      <div class="stat-label">Cells</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value" id="stat-airports">0</div>
-      <div class="stat-label">Airports</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value" id="stat-routes">0</div>
-      <div class="stat-label">Routes</div>
-    </div>
-  </div>
 
   <!-- Loading overlay -->
   <div class="loading-overlay" id="loading">
@@ -1215,12 +1191,12 @@ function formatTime(minutes) {
   return `${hours}h ${mins.toString().padStart(2, '0')}m`;
 }
 
-// toggle settings panel visibility
-function toggleSettings() {
-  const content = document.getElementById('settings-content');
-  const toggle = document.getElementById('settings-toggle');
-  content.classList.toggle('expanded');
-  toggle.classList.toggle('expanded');
+// toggle info panel visibility
+function toggleInfoPanel() {
+  const panel = document.getElementById('info-panel');
+  const btn = document.getElementById('info-btn');
+  panel.classList.toggle('visible');
+  btn.classList.toggle('active');
 }
 
 function getTimeBandColor(totalMinutes) {
@@ -1585,14 +1561,16 @@ let currentResolution = 3;
 let isUpdatingGrid = false;
 
 function getResolutionForZoom(zoom) {
-  // Finer resolutions since we only render viewport
-  // Lower res = bigger hexes = fewer cells = faster render
-  if (zoom < 1.5) return 1;     // Far globe: res 1 (~10k km² cells, very few)
-  if (zoom < 2.5) return 2;     // Globe view: res 2 (~86k km² cells)
-  if (zoom < 4) return 3;       // Continental: res 3 (~12k km² cells)
-  if (zoom < 5.5) return 4;     // Regional: res 4 (~1.7k km² cells)
-  if (zoom < 7) return 5;       // Local: res 5 (~252 km² cells)
-  return 6;                      // Street level: res 6 (~36 km² cells)
+  // res 1-4: precomputed from JSON (<100ms) — use aggressively
+  // res 5-6: on-demand grid iteration (100ms-1800ms) — keep conservative
+  //
+  // previous thresholds: 1.5/2.5/4/5.5/7
+  if (zoom < 1) return 1;       // far globe: res 1 (was <1.5)
+  if (zoom < 2) return 2;       // globe: res 2 (was <2.5)
+  if (zoom < 3) return 3;       // continental: res 3 (was <4)
+  if (zoom < 5) return 4;       // regional: res 4, precomputed (was <5.5)
+  if (zoom < 6.5) return 5;     // local: res 5, on-demand (was <7)
+  return 6;                      // street: res 6, on-demand
 }
 
 async function initMap() {
@@ -1877,12 +1855,10 @@ function updateGrid(resolution = currentResolution, flyToOrigin = true) {
     map.getSource('hexgrid').setData(gridData);
     map.getSource('origin').setData(generateOriginGeoJSON());
 
-    // Update stats - use loaded data counts if available
+    // Update stats
     document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
-    const airportCount = LOADED_AIRPORTS ? Object.keys(LOADED_AIRPORTS).length : AIRPORTS.length;
-    const routeCount = LOADED_ROUTES ? Object.values(LOADED_ROUTES).reduce((a,b) => a + b.length, 0) : Object.values(FLIGHT_TIMES).reduce((sum, routes) => sum + Object.keys(routes).length, 0);
-    document.getElementById('stat-airports').textContent = airportCount.toLocaleString();
-    document.getElementById('stat-routes').textContent = routeCount.toLocaleString();
+    document.getElementById('stat-zoom').textContent = zoom.toFixed(1);
+    document.getElementById('stat-res').textContent = resolution;
 
     // Only fly to origin when origin changes, not on resolution change
     if (flyToOrigin) {
@@ -1898,6 +1874,175 @@ function updateGrid(resolution = currentResolution, flyToOrigin = true) {
     }
     isUpdatingGrid = false;
   });
+}
+
+// =============================================================================
+// BENCHMARK — call from console: runBenchmark()
+// waits for data load, shows visual overlay, tests zoom + pan, 3-run avg
+// =============================================================================
+async function runBenchmark() {
+  // ensure data is loaded
+  if (!LOADED_ISOCHRONE) {
+    console.error('[BENCH] isochrone data not loaded yet — wait for page init');
+    return null;
+  }
+
+  // visual overlay so you can watch
+  let overlay = document.getElementById('bench-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'bench-overlay';
+    overlay.style.cssText = `
+      position:fixed; top:10px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.85); color:#0f0; font-family:monospace;
+      font-size:14px; padding:12px 20px; border-radius:8px; z-index:9999;
+      border:1px solid #0f0; min-width:300px; text-align:center;
+    `;
+    document.body.appendChild(overlay);
+  }
+  const showStatus = (msg) => { overlay.textContent = msg; };
+
+  const origin = ORIGINS[currentOrigin];
+  const results = [];
+  const RUNS = 3; // avg over this many runs
+
+  // --- Phase 1: zoom sweep at origin center ---
+  const zoomSteps = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7];
+  for (const z of zoomSteps) {
+    showStatus(`ZOOM SWEEP: z=${z} ...`);
+    map.jumpTo({center: origin.coordinates, zoom: z});
+    await new Promise(r => setTimeout(r, 500)); // let maplibre fully settle
+
+    const res = getResolutionForZoom(z);
+    const bounds = map.getBounds();
+    const vb = z >= 3 ? {
+      north: bounds.getNorth(), south: bounds.getSouth(),
+      east: bounds.getEast(), west: bounds.getWest()
+    } : null;
+
+    // warm-up run (fills caches)
+    generateHexGrid(origin, res, vb);
+
+    const times = [];
+    for (let i = 0; i < RUNS; i++) {
+      const t0 = performance.now();
+      const grid = generateHexGrid(origin, res, vb);
+      times.push({ms: performance.now() - t0, cells: grid.features.length});
+    }
+    const avgMs = times.reduce((s, t) => s + t.ms, 0) / times.length;
+    const path = res <= 4 && LOADED_ISOCHRONE ? 'precomputed' : 'on-demand';
+    results.push({
+      test: 'zoom', zoom: z, res, cells: times[0].cells, path,
+      avgMs: +avgMs.toFixed(1), minMs: +Math.min(...times.map(t=>t.ms)).toFixed(1),
+      maxMs: +Math.max(...times.map(t=>t.ms)).toFixed(1),
+    });
+    showStatus(`ZOOM z=${z} → res ${res} (${path}): ${avgMs.toFixed(0)}ms, ${times[0].cells} cells`);
+    await new Promise(r => setTimeout(r, 400)); // pause so user can read
+  }
+
+  // --- Phase 2: pan test at fixed zoom levels ---
+  const panTargets = [
+    {name: 'london',   coords: [-0.12, 51.51]},
+    {name: 'paris',    coords: [2.35, 48.86]},
+    {name: 'reykjavik', coords: [-21.9, 64.14]},
+    {name: 'istanbul', coords: [28.98, 41.01]},
+  ];
+  const panZooms = [4, 5.5, 7]; // one precomputed, one boundary, one on-demand
+  for (const z of panZooms) {
+    for (const tgt of panTargets) {
+      showStatus(`PAN TEST: z=${z} → ${tgt.name} ...`);
+      map.jumpTo({center: tgt.coords, zoom: z});
+      await new Promise(r => setTimeout(r, 500));
+
+      const res = getResolutionForZoom(z);
+      const bounds = map.getBounds();
+      const vb = {
+        north: bounds.getNorth(), south: bounds.getSouth(),
+        east: bounds.getEast(), west: bounds.getWest()
+      };
+
+      generateHexGrid(origin, res, vb); // warm-up
+      const times = [];
+      for (let i = 0; i < RUNS; i++) {
+        const t0 = performance.now();
+        const grid = generateHexGrid(origin, res, vb);
+        times.push({ms: performance.now() - t0, cells: grid.features.length});
+      }
+      const avgMs = times.reduce((s, t) => s + t.ms, 0) / times.length;
+      const path = res <= 4 && LOADED_ISOCHRONE ? 'precomputed' : 'on-demand';
+      results.push({
+        test: `pan:${tgt.name}`, zoom: z, res, cells: times[0].cells, path,
+        avgMs: +avgMs.toFixed(1), minMs: +Math.min(...times.map(t=>t.ms)).toFixed(1),
+        maxMs: +Math.max(...times.map(t=>t.ms)).toFixed(1),
+      });
+      showStatus(`PAN ${tgt.name} z=${z}: ${avgMs.toFixed(0)}ms, ${times[0].cells} cells`);
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  // --- Done ---
+  const run = {
+    timestamp: new Date().toISOString(),
+    origin: currentOrigin,
+    thresholds: zoomSteps.map(z => z + '→r' + getResolutionForZoom(z)).join(', '),
+    results,
+  };
+
+  // log results
+  console.log('\n[BENCH] ========== RESULTS ==========');
+  console.log('[BENCH] timestamp:', run.timestamp);
+  console.log('[BENCH] origin:', run.origin);
+  console.log('[BENCH] thresholds:', run.thresholds);
+  console.table(results);
+
+  // diff against baseline if loaded
+  if (window._benchBaseline) {
+    const prev = window._benchBaseline;
+    console.log('\n[BENCH] ========== DIFF vs BASELINE ==========');
+    console.log('[BENCH] baseline:', prev.timestamp);
+    const diffs = results.map((cur, i) => {
+      const old = prev.results[i];
+      if (!old) return null;
+      const delta = cur.avgMs - old.avgMs;
+      const pct = old.avgMs > 0 ? (delta / old.avgMs * 100).toFixed(1) : 'N/A';
+      return {
+        test: cur.test, zoom: cur.zoom, res: cur.res,
+        prev: old.avgMs, curr: cur.avgMs,
+        delta: +delta.toFixed(1), pct: pct + '%',
+        cells_prev: old.cells, cells_curr: cur.cells,
+      };
+    }).filter(Boolean);
+    console.table(diffs);
+  }
+
+  showStatus('BENCHMARK COMPLETE — see console, use benchExport() to save');
+  setTimeout(() => overlay.remove(), 5000);
+
+  window._lastBench = run;
+  return run;
+}
+
+// benchExport(label) — download JSON file for committing to repo
+// saves to docs/benchmarks/{label}.json
+function benchExport(label) {
+  const run = window._lastBench;
+  if (!run) { console.error('[BENCH] no results — run runBenchmark() first'); return; }
+  const filename = (label || 'bench-' + run.timestamp.slice(0, 10)) + '.json';
+  const blob = new Blob([JSON.stringify(run, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  console.log('[BENCH] exported:', filename, '— commit to docs/benchmarks/');
+}
+
+// benchLoadBaseline(url) — load a baseline JSON file for diffing
+// e.g. benchLoadBaseline('docs/benchmarks/baseline.json')
+async function benchLoadBaseline(url) {
+  const resp = await fetch(url);
+  window._benchBaseline = await resp.json();
+  console.log('[BENCH] baseline loaded:', window._benchBaseline.timestamp);
 }
 
 function showTooltip(properties) {
@@ -1947,11 +2092,6 @@ function hideTooltip() {
 // =============================================================================
 // EVENT LISTENERS
 // =============================================================================
-
-document.getElementById('origin-select').addEventListener('change', (e) => {
-  currentOrigin = e.target.value;
-  updateGrid();
-});
 
 document.getElementById('toggle-airports').addEventListener('change', (e) => {
   const visibility = e.target.checked ? 'visible' : 'none';

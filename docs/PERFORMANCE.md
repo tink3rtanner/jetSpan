@@ -5,39 +5,25 @@
 This document tracks performance benchmarks for the JetSpan flight isochrone visualization.
 Benchmarks should be re-run after significant changes to measure improvement/regression.
 
-## Test Suite
+## How to Benchmark
 
-The test suite is located at `scripts/performance-tests.js` and can be injected into the browser console.
-
-### Usage
+Built into `isochrone.html` — open browser console after page loads:
 
 ```javascript
-// Full suite (all tests)
-await perfTests.runAll();
+// run benchmark (green overlay shows progress)
+await runBenchmark()
 
-// Individual suites
-await perfTests.runZoomSuite();      // Test all zoom levels
-await perfTests.runPanSuite();       // Test panning globally
-await perfTests.runEdgeCaseSuite();  // Test water, remote areas
-await perfTests.runCacheSuite();     // Test cache effectiveness
+// compare against a baseline
+await benchLoadBaseline('docs/benchmarks/2026-01-29-baseline.json')
+await runBenchmark()       // prints diff table vs baseline
 
-// View results
-perfTests.printResults();
-perfTests.printSummary();
-perfTests.exportJSON();  // Export for comparison
+// save results to commit
+benchExport('my-label')    // downloads JSON file → commit to docs/benchmarks/
 ```
 
-### Test Categories
+Tests: 14 zoom levels (z0.5–z7) + 4 pan targets × 3 zooms. Each test: 1 warm-up + 3 measured runs.
 
-| Category | Description |
-|----------|-------------|
-| zoom | Resolution transitions from z0.8 (globe) to z7 (street) |
-| pan | Panning to 14 global locations |
-| edge-water | Ocean areas (should be fast due to water skip) |
-| edge-remote | Remote land areas (Siberia, Greenland) |
-| edge-dense | High airport density areas (Singapore, Frankfurt) |
-| cache-cold | First visit to locations |
-| cache-warm | Revisit same locations (should be faster) |
+Baseline file: `docs/benchmarks/2026-01-29-baseline.json`
 
 ---
 
@@ -144,14 +130,10 @@ Less important now that res 1-3 are fast via direct rendering.
 
 ---
 
-## How to Run Benchmarks
+## Legacy Test Suite
 
-1. Start dev server: `python3 -m http.server 8765`
-2. Open `http://localhost:8765/isochrone.html`
-3. Open browser console
-4. Paste contents of `scripts/performance-tests.js`
-5. Run: `await perfTests.runAll()`
-6. Save results: `perfTests.exportJSON()`
+`scripts/performance-tests.js` — older external benchmark, predates the built-in one.
+Mostly obsolete but kept for reference.
 
 ---
 
@@ -323,3 +305,123 @@ WHY HYBRID?
 - 100x+ speedup for zoomed-out views (15s → <100ms)
 - Predictable performance
 - Eliminates grid iteration overhead entirely for res 1-4
+
+---
+
+## 2026-01-29 — Benchmark Tooling & Threshold Tuning
+
+### Built-in Benchmark
+
+`runBenchmark()` is now built into `isochrone.html`. Call from browser console.
+
+- Waits for isochrone data to load before running
+- Shows green overlay with live status during run
+- Phase 1: zoom sweep (z0.5–z7, 14 steps) centered on origin
+- Phase 2: pan tests (4 cities × 3 zoom levels = 12 tests)
+- Each test: 1 warm-up run + 3 measured runs → reports avg/min/max
+- Results stored in `window._lastBench`, logged via `console.table()`
+
+### Zoom Threshold Changes
+
+Shifted precomputed resolutions to kick in earlier (finer detail sooner).
+The res 4→5 boundary is the critical cliff — precomputed ends, on-demand begins.
+
+```
+zoom   old res   new res   path
+────   ───────   ───────   ───────────
+<1     1         1         precomputed
+<1.5   1         2         precomputed (was res 1)
+<2     2         2         precomputed
+<2.5   2         3         precomputed (was res 2)
+<3     3         3         precomputed
+<4     3         4         precomputed (was res 3)
+<4.5   4         4         precomputed
+<5     4         4         precomputed
+<5.5   4         5 !!      ON-DEMAND (was precomputed — reverted)
+<5     —         4         precomputed (final: boundary at z5)
+<6.5   5         5         on-demand
+<7     5         6         on-demand (was res 5)
+7+     6         6         on-demand
+```
+
+Final thresholds: `1 / 2 / 3 / 5 / 6.5` (was `1.5 / 2.5 / 4 / 5.5 / 7`)
+
+Net effect: finer precomputed cells earlier, no regression on the precomputed→on-demand cliff.
+
+### Benchmark Results (new thresholds)
+
+**Hardware**: MacBook (darwin 25.2.0), Chrome
+**Origin**: Bristol
+**Data**: bristol.json (8.7 MB, 143,077 cells, res 1-4 precomputed)
+
+#### Zoom Sweep
+
+| Zoom | Res | Path | Cells | Run 1 (ms) | Run 2 (ms) | Δ |
+|------|-----|------|-------|------------|------------|---|
+| 0.5 | 1 | precomputed | 355 | 1.6 | 1.5 | -6% |
+| 1.0 | 2 | precomputed | 2,500 | 6.2 | 5.6 | -10% |
+| 1.5 | 2 | precomputed | 2,500 | 6.0 | 5.7 | -5% |
+| 2.0 | 3 | precomputed | 17,515 | 39.2 | 44.4 | +13% |
+| 2.5 | 3 | precomputed | 17,515 | 42.9 | 43.8 | +2% |
+| 3.0 | 4 | precomputed | 72,312 | 204.1 | 217.4 | +7% |
+| 3.5 | 4 | precomputed | 28,141 | 112.7 | 108.0 | -4% |
+| 4.0 | 4 | precomputed | 9,759 | 75.9 | 74.4 | -2% |
+| 4.5 | 4 | precomputed | 4,044 | 63.3 | 62.8 | -1% |
+| **5.0** | **5** | **on-demand** | **8,737** | **2,444** | **2,397** | **-2%** |
+| 5.5 | 5 | on-demand | 4,507 | 354 | 352 | -1% |
+| 6.0 | 5 | on-demand | 2,545 | 104.8 | 105.7 | +1% |
+| 6.5 | 6 | on-demand | 8,039 | 543.7 | 546.6 | +1% |
+| 7.0 | 6 | on-demand | 4,268 | 257.3 | 258.3 | +0.4% |
+
+#### Pan Tests
+
+| Location | z=4 precomp (ms) | z=5.5 on-demand (ms) | z=7 on-demand (ms) |
+|----------|-----------------|---------------------|-------------------|
+| London | 79 / 75 | 254 / 255 | 283 / 276 |
+| Paris | 77 / 77 | 253 / 245 | 320 / 321 |
+| Reykjavik | 64 / 65 | 332 / 326 | 177 / 171 |
+| Istanbul | 92 / 89 | 373 / 363 | 386 / 392 |
+
+(format: run 1 / run 2)
+
+### Reproducibility
+
+Run-to-run variance with 3-trial averaging:
+- **Precomputed path**: ±5-13% on fast tests (<10ms), ±1-7% on larger (>60ms)
+- **On-demand path**: ±0.1-2% — very stable
+- **Cell counts**: identical both runs (deterministic)
+
+The high % variance on fast precomputed tests (e.g. 39→44ms = +13%) is noise —
+absolute delta is only ~5ms, well within JS timer granularity and GC jitter.
+On-demand tests are stable bc they're slower and dominate the measurement.
+
+### Key Insight: The Precomputed Cliff
+
+```
+              precomputed                    on-demand
+         ◄──────────────────►    ◄──────────────────────────►
+  z: 0.5  1  1.5  2  2.5  3  3.5  4  4.5 │ 5    5.5   6   6.5   7
+ ms:   2   6   6  39  43  204 113  76  63 │ 2444  354  105  544  257
+                                           │
+                                    39x cliff ─┘
+```
+
+At z5.0 (res 5), render time jumps from 63ms → 2,444ms.
+This is the precomputed→on-demand boundary: res 4 data exists in JSON, res 5 does not.
+
+### Path to Full Precompute
+
+Eliminating on-demand rendering entirely requires precomputing res 5-6.
+
+| Res | Est cells | Est size | Compute time (est) | Notes |
+|-----|-----------|----------|--------------------|-|
+| 5 | ~860k | ~58 MB raw | ~30-60s | 7x res 4 cells |
+| 6 | ~6M | ~400 MB raw | ~5-10 min | impractical as single file |
+
+With water/remote filtering: res 5 likely ~500k cells, ~35 MB.
+
+**Options to stay under GitHub Pages limits:**
+1. Split by resolution — lazy-load `bristol_r5.json` when zoom crosses threshold
+2. gzip — GitHub Pages serves gzip; ~60-70% compression on JSON → ~10-15 MB
+3. Binary packing — `{t,o,a,s}` as fixed-width fields instead of JSON keys
+4. Selective res 5 — only precompute within ~2000km of origin (covers useful zoom range)
