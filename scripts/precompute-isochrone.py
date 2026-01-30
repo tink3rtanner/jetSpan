@@ -80,8 +80,8 @@ def load_osrm_ground_data():
     if not ground_dir.exists():
         return osrm
     for f in ground_dir.glob("*.json"):
-        if f.name.startswith("."):
-            continue
+        if f.name.startswith(".") or f.name.startswith("origin-"):
+            continue  # skip origin files — loaded separately
         try:
             with open(f) as fh:
                 data = json.load(fh)
@@ -95,6 +95,22 @@ def load_osrm_ground_data():
     if osrm:
         print(f"  OSRM ground data: {len(osrm)} airports ({', '.join(sorted(osrm.keys()))})")
     return osrm
+
+
+def load_origin_ground_data(origin_name):
+    """load OSRM drive times from origin city center.
+    returns {h3_res6_cell: minutes} or empty dict if not available."""
+    path = Path(__file__).parent.parent / "data" / "ground" / f"origin-{origin_name}.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        print(f"  origin ground data: {len(data)} cells from {path.name}")
+        return data
+    except Exception as e:
+        print(f"  warning: couldn't load {path.name}: {e}")
+        return {}
 
 
 # =============================================================================
@@ -173,14 +189,17 @@ def osrm_ground_time(osrm_data, airport_code, lat, lng):
 
 
 def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
-                    osrm_data=None, index_res=2, k_rings=3):
+                    osrm_data=None, origin_ground=None, index_res=2, k_rings=3):
     """
     find best route to cell at (lat, lng) using spatial index.
     uses OSRM ground data when available; falls back to haversine.
+    origin_ground: {h3_cell: minutes} from origin city center (for drive-only check).
     returns (total_minutes, route_info) or (None, None).
     """
     if osrm_data is None:
         osrm_data = {}
+    if origin_ground is None:
+        origin_ground = {}
 
     # check nearby buckets
     try:
@@ -248,19 +267,41 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
     if best_total == float('inf'):
         return None, None
 
-    # also check drive-only for nearby destinations
-    # only use NEAREST origin airport OSRM (index 0) — using distant airports
-    # like LHR would give wrong drive times (distance from LHR, not Bristol)
+    # drive-only check: is driving from home faster than any flight?
+    # uses OSRM data from origin city center (not airport) when available
     origin_coords = origin_cfg['coords']  # (lng, lat) tuple
     drive_dist = haversine_km(lat, lng, origin_coords[1], origin_coords[0])
     if drive_dist < MAX_GROUND_KM:
-        nearest_apt = origin_cfg['airports'][0]['code']  # e.g. BRS for Bristol
-        osrm_time = osrm_ground_time(osrm_data, nearest_apt, lat, lng)
+        # try origin OSRM first (drive from city center, not airport)
+        try:
+            cell6 = h3.latlng_to_cell(lat, lng, 6)
+            origin_osrm = origin_ground.get(cell6)
+        except Exception:
+            origin_osrm = None
 
-        if osrm_time == -1 or osrm_time is None:
-            # no OSRM data for this airport, or cell has no OSRM entry
-            # (OSRM crawl is sparse — missing entry != water)
-            # fall back to haversine
+        if origin_osrm is not None:
+            # have real drive time from origin city center
+            # water filter: if OSRM >> haversine, routing around water
+            hav_estimate = estimate_ground_minutes(drive_dist)
+            if hav_estimate > 0 and origin_osrm > hav_estimate * WATER_DETOUR_RATIO:
+                pass  # probable water cell — skip drive option
+            elif origin_osrm < best_total:
+                return origin_osrm, {
+                    "origin_airport": "drive",
+                    "dest_airport": "drive",
+                    "is_direct": True,
+                    "stops": -1,
+                    "path": ["drive"],
+                    "ground_to": origin_osrm,
+                    "overhead": 0,
+                    "flight": 0,
+                    "connections": 0,
+                    "arrival": 0,
+                    "ground_from": 0,
+                    "osrm": True,
+                }
+        else:
+            # no origin OSRM — haversine fallback from city center
             drive_time = estimate_ground_minutes(drive_dist)
             if drive_time < best_total:
                 return drive_time, {
@@ -276,27 +317,6 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
                     "arrival": 0,
                     "ground_from": 0,
                     "osrm": False,
-                }
-        else:
-            # have OSRM time from nearest airport — use it
-            # water filter: if OSRM >> haversine, routing around water
-            hav_estimate = estimate_ground_minutes(drive_dist)
-            if hav_estimate > 0 and osrm_time > hav_estimate * WATER_DETOUR_RATIO:
-                pass  # skip — probable water cell
-            elif osrm_time < best_total:
-                return osrm_time, {
-                    "origin_airport": "drive",
-                    "dest_airport": "drive",
-                    "is_direct": True,
-                    "stops": -1,
-                    "path": ["drive"],
-                    "ground_to": osrm_time,
-                    "overhead": 0,
-                    "flight": 0,
-                    "connections": 0,
-                    "arrival": 0,
-                    "ground_from": 0,
-                    "osrm": True,
                 }
 
     return best_total, best_info
@@ -353,7 +373,8 @@ def compact_cell(travel_time, route):
     return cell
 
 
-def iterate_resolution(res, spatial_index, airports, origin_cfg, osrm_data=None):
+def iterate_resolution(res, spatial_index, airports, origin_cfg,
+                       osrm_data=None, origin_ground=None):
     """iterate all h3 cells at a resolution, return dict of cell -> compact data."""
     start = time.time()
     cells = get_h3_cells_global(res)
@@ -374,7 +395,8 @@ def iterate_resolution(res, spatial_index, airports, origin_cfg, osrm_data=None)
 
         lat, lng = h3.cell_to_latlng(cell)
         travel_time, route = query_cell_fast(
-            lat, lng, spatial_index, airports, origin_cfg, osrm_data=osrm_data
+            lat, lng, spatial_index, airports, origin_cfg,
+            osrm_data=osrm_data, origin_ground=origin_ground
         )
 
         if travel_time is not None:
@@ -424,6 +446,8 @@ def precompute_origin(origin_name, airports, routes):
     # step 3: load OSRM ground data (road-network driving times)
     print("\nloading OSRM ground data...")
     osrm_data = load_osrm_ground_data()
+    print("loading origin ground data...")
+    origin_ground = load_origin_ground_data(origin_name)
 
     # step 4: build spatial index of reachable airports
     print("\nbuilding spatial index...")
@@ -450,7 +474,8 @@ def precompute_origin(origin_name, airports, routes):
     for res in BASE_RESOLUTIONS + CHUNKED_RESOLUTIONS:
         print(f"\nresolution {res}...")
         res_data, computed, skipped, elapsed = iterate_resolution(
-            res, spatial_index, airports, origin_cfg, osrm_data=osrm_data
+            res, spatial_index, airports, origin_cfg,
+            osrm_data=osrm_data, origin_ground=origin_ground
         )
 
         if res in BASE_RESOLUTIONS:

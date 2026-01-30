@@ -111,9 +111,9 @@ every cell's time is the sum of five legs:
       │                                                           │
       ▼                                                           ▼
   ┌───────┐   ┌────────┐   ┌─────────────────────┐   ┌───────┐
-  │ground │   │overhead│   │      flights         │   │ground │
-  │  to   │──>│security│──>│  + connections       │──>│ from  │
-  │airport│   │boarding│   │  (per stop: 90+30m)  │   │airport│
+  │ground │   │overhead│   │      flights        │   │airport│
+  │  to   │──>│security│──>│  + connections      │──>│ to    │
+  │airport│   │boarding│   │  (per stop: 90+30m  │   │ground │
   └───────┘   └────────┘   └─────────────────────┘   └───────┘
    25-150m      90m          varies                    0-60m
                                                     + 30-60m arrival
