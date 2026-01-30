@@ -187,6 +187,47 @@
       transform: translateX(18px);
     }
 
+    .slider-row {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .slider-row:last-child {
+      border-bottom: none;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .slider-value {
+      font-variant-numeric: tabular-nums;
+      opacity: 0.7;
+    }
+
+    .slider-row input[type="range"] {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .slider-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      background: #fff;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
 
     /* Legend */
     .legend {
@@ -258,12 +299,17 @@
     .tooltip-location {
       font-size: 16px;
       font-weight: 600;
+      flex: 1;
+      min-width: 0;
     }
 
     .tooltip-time {
       font-size: 20px;
       font-weight: 700;
       color: #22c55e;
+      white-space: nowrap;
+      margin-left: 12px;
+      flex-shrink: 0;
     }
 
     .tooltip-breakdown {
@@ -386,6 +432,15 @@
       </div>
     </div>
     <div class="info-section">
+      <div class="info-section-label">Viewport</div>
+      <div class="info-stats">
+        <div class="stat" style="flex: 1">
+          <div class="stat-value" id="stat-center" style="font-size: 13px">—</div>
+          <div class="stat-label">Center</div>
+        </div>
+      </div>
+    </div>
+    <div class="info-section">
       <div class="info-section-label">Display Options</div>
       <div class="toggle-row">
         <span>Show airports</span>
@@ -400,6 +455,13 @@
           <input type="checkbox" id="toggle-grid" checked>
           <span class="toggle-slider"></span>
         </label>
+      </div>
+      <div class="slider-row">
+        <div class="slider-header">
+          <span>Color scale</span>
+          <span class="slider-value" id="color-scale-label">1.0×</span>
+        </div>
+        <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1">
       </div>
     </div>
   </div>
@@ -425,26 +487,8 @@
       <div class="tooltip-location" id="tooltip-location">Paris, France</div>
       <div class="tooltip-time" id="tooltip-time">3h 45m</div>
     </div>
-    <div class="tooltip-breakdown">
-      <div class="breakdown-row route" id="tooltip-route">
-        <span>Bristol → LHR → CDG → Paris</span>
-      </div>
-      <div class="breakdown-row">
-        <span class="label">Ground to airport</span>
-        <span class="value" id="tooltip-ground-to">2h 00m</span>
-      </div>
-      <div class="breakdown-row">
-        <span class="label">Airport overhead</span>
-        <span class="value" id="tooltip-overhead">1h 30m</span>
-      </div>
-      <div class="breakdown-row">
-        <span class="label">Flight time</span>
-        <span class="value" id="tooltip-flight">1h 15m</span>
-      </div>
-      <div class="breakdown-row">
-        <span class="label">Arrival + ground</span>
-        <span class="value" id="tooltip-ground-from">1h 00m</span>
-      </div>
+    <div class="tooltip-breakdown" id="tooltip-breakdown">
+      <!-- populated dynamically by showTooltip() -->
     </div>
   </div>
 
@@ -462,43 +506,17 @@
 
 // loaded data (populated by loadJetSpanData)
 let LOADED_AIRPORTS = null;  // {code: {name, lat, lng, country, type}}
-let LOADED_ROUTES = null;    // {code: [destinations]}
-let LOADED_GROUND = {};      // {region: {airport: {h3cell: minutes}}}
+let LOADED_ROUTES = null;    // {code: [destinations]}  (raw flight routes)
 let LOADED_ISOCHRONE = null; // pre-computed isochrone data {resolutions: {res: {h3cell: {time, route}}}}
 let DATA_LOADED = false;
 
-// region mapping for lazy loading ground data
-const COUNTRY_TO_REGION = {
-  'GB': 'europe', 'FR': 'europe', 'DE': 'europe', 'ES': 'europe', 'IT': 'europe',
-  'NL': 'europe', 'BE': 'europe', 'AT': 'europe', 'CH': 'europe', 'PT': 'europe',
-  'IE': 'europe', 'NO': 'europe', 'SE': 'europe', 'DK': 'europe', 'FI': 'europe',
-  'US': 'north-america', 'CA': 'north-america', 'MX': 'north-america',
-  'JP': 'asia', 'CN': 'asia', 'KR': 'asia', 'IN': 'asia', 'TH': 'asia', 'SG': 'asia',
-  'AU': 'oceania', 'NZ': 'oceania',
-  'AE': 'middle-east', 'QA': 'middle-east', 'SA': 'middle-east', 'IL': 'middle-east',
-  'BR': 'south-america', 'AR': 'south-america', 'CL': 'south-america',
-  'ZA': 'africa', 'KE': 'africa', 'NG': 'africa', 'EG': 'africa',
-};
+// route table: per-airport routing info from dijkstra (loaded from routes.json)
+// {airport_code: {p: [path], l: [leg_times], t: dijkstra_total, s: stops}}
+let LOADED_ROUTE_TABLE = null;
 
-// travel time cache: h3Cell -> {origin: result}
-let _travelTimeCache = {};
-let _currentCacheOrigin = null;
-
-function getTravelTimeFromCache(h3Cell, origin) {
-  if (_currentCacheOrigin !== origin) {
-    _travelTimeCache = {};  // clear cache on origin change
-    _currentCacheOrigin = origin;
-  }
-  return _travelTimeCache[h3Cell];
-}
-
-function setTravelTimeCache(h3Cell, origin, result) {
-  if (_currentCacheOrigin !== origin) {
-    _travelTimeCache = {};
-    _currentCacheOrigin = origin;
-  }
-  _travelTimeCache[h3Cell] = result;
-}
+// chunk loading state: track which parent cells have been fetched per resolution
+const loadedChunks = { 5: new Set(), 6: new Set() };
+let _chunkLoadingInProgress = false;
 
 async function loadJetSpanData() {
   try {
@@ -513,36 +531,16 @@ async function loadJetSpanData() {
       LOADED_ROUTES = await routesRes.json();
       DATA_LOADED = true;
       console.log(`[JetSpan] Loaded ${Object.keys(LOADED_AIRPORTS).length} airports, ${Object.values(LOADED_ROUTES).reduce((a,b) => a + b.length, 0)} routes`);
-
-      // pre-build spatial index
-      buildAirportSpatialIndex();
     }
   } catch (e) {
     console.log('[JetSpan] Data files not found, using fallback data');
   }
 }
 
-async function loadGroundData(region) {
-  if (LOADED_GROUND[region]) return LOADED_GROUND[region];
-
-  try {
-    const res = await fetch(`data/ground/${region}.json`);
-    if (res.ok) {
-      LOADED_GROUND[region] = await res.json();
-      console.log(`[JetSpan] Loaded ground data for ${region}: ${Object.keys(LOADED_GROUND[region]).length} airports`);
-      return LOADED_GROUND[region];
-    }
-  } catch (e) {
-    // ignore, will fall back to estimate
-  }
-  LOADED_GROUND[region] = {};
-  return {};
-}
-
 // load pre-computed isochrone data for an origin
 async function loadIsochroneData(originKey) {
   try {
-    const res = await fetch(`data/isochrones/${originKey}.json`);
+    const res = await fetch(`data/isochrones/${originKey}.json`, {cache: 'no-cache'});
     if (res.ok) {
       LOADED_ISOCHRONE = await res.json();
       const totalCells = Object.values(LOADED_ISOCHRONE.resolutions).reduce((a, b) => a + Object.keys(b).length, 0);
@@ -550,30 +548,137 @@ async function loadIsochroneData(originKey) {
       return LOADED_ISOCHRONE;
     }
   } catch (e) {
-    console.log(`[JetSpan] No pre-computed isochrone for ${originKey}, will compute on-demand`);
+    console.log(`[JetSpan] No pre-computed isochrone for ${originKey}`);
   }
   LOADED_ISOCHRONE = null;
   return null;
 }
 
+// load route table for an origin (per-airport routing info for tooltips)
+async function loadRouteTable(originKey) {
+  try {
+    const res = await fetch(`data/isochrones/${originKey}/routes.json`, {cache: 'no-cache'});
+    if (res.ok) {
+      LOADED_ROUTE_TABLE = await res.json();
+      console.log(`[JetSpan] Loaded route table for ${originKey}: ${Object.keys(LOADED_ROUTE_TABLE).length} airports`);
+      return LOADED_ROUTE_TABLE;
+    }
+  } catch (e) {
+    console.log(`[JetSpan] No route table for ${originKey}`);
+  }
+  LOADED_ROUTE_TABLE = null;
+  return null;
+}
+
+// determine which h3 parent cells are visible in the current viewport
+function getVisibleParentCells(bounds, parentRes) {
+  const cells = new Set();
+  // step size in degrees — must be smaller than cell diameter to avoid gaps
+  // res 1 cells ~4.7° across, res 2 cells ~1.8° across
+  const step = parentRes === 1 ? 3 : 1;
+  for (let lat = bounds.south; lat <= bounds.north; lat += step) {
+    for (let lng = bounds.west; lng <= bounds.east; lng += step) {
+      try {
+        cells.add(h3.latLngToCell(lat, lng, parentRes));
+      } catch (e) {
+        // skip invalid coords
+      }
+    }
+  }
+  return [...cells];
+}
+
+// fetch and decompress a gzipped JSON file (chunks stored as .json.gz to save repo space)
+async function fetchGzipJSON(url) {
+  const res = await fetch(url, {cache: 'no-cache'});
+  if (!res.ok) return null;
+  const ds = new DecompressionStream('gzip');
+  const stream = res.body.pipeThrough(ds);
+  return new Response(stream).json();
+}
+
+// load chunked res 5-6 data for the visible viewport
+async function loadChunksForViewport(resolution, bounds) {
+  if (_chunkLoadingInProgress) return;
+  _chunkLoadingInProgress = true;
+
+  try {
+    // res 5 chunks grouped by res-1 parent, res 6 by res-2 parent
+    const parentRes = resolution === 5 ? 1 : 2;
+    const needed = getVisibleParentCells(bounds, parentRes);
+    const toFetch = needed.filter(p => !loadedChunks[resolution].has(p));
+
+    if (toFetch.length === 0) {
+      return; // all needed chunks already loaded
+    }
+
+    console.log(`[JetSpan] Loading ${toFetch.length} r${resolution} chunks...`);
+    const t0 = performance.now();
+
+    // fetch all needed chunks in parallel (gzipped, client decompresses)
+    const results = await Promise.all(
+      toFetch.map(parent =>
+        fetchGzipJSON(`data/isochrones/${currentOrigin}/r${resolution}/${parent}.json.gz`)
+          .catch(() => null)
+      )
+    );
+
+    // merge into LOADED_ISOCHRONE
+    if (!LOADED_ISOCHRONE.resolutions[String(resolution)]) {
+      LOADED_ISOCHRONE.resolutions[String(resolution)] = {};
+    }
+    const resData = LOADED_ISOCHRONE.resolutions[String(resolution)];
+    let loadedCells = 0;
+    results.forEach((data, i) => {
+      if (data) {
+        Object.assign(resData, data);
+        loadedCells += Object.keys(data).length;
+        loadedChunks[resolution].add(toFetch[i]); // only mark loaded on success
+      }
+      // failed chunks NOT marked — will retry on next viewport update
+    });
+
+    const elapsed = performance.now() - t0;
+    console.log(`[JetSpan] Loaded ${loadedCells} r${resolution} cells in ${elapsed.toFixed(0)}ms (${toFetch.length} chunks)`);
+  } finally {
+    _chunkLoadingInProgress = false;
+  }
+}
+
 // parse pre-computed cell data into standard result format
-// handles both compact format (t/o/a/s) and verbose format (time/route)
+// uses route table for exact breakdown when available
 function parseCellData(cellData) {
   // compact format: {t, o, a, s} or {t, d} for drive-only
-  if ('t' in cellData) {
-    if (cellData.d) {
-      // drive-only cell
-      return {
-        totalMinutes: cellData.t,
-        breakdown: { groundTo: cellData.t, overhead: 0, flight: 0, arrival: 0, groundFrom: 0 },
-        route: { originAirport: 'drive', destAirport: 'drive', isDirect: true, stops: -1, path: [] },
-      };
-    }
-    // flight cell — derive breakdown from origin/dest airport info
-    const originCode = cellData.o || 'N/A';
-    const destCode = cellData.a || 'N/A';
-    const stops = cellData.s || 0;
-    // look up ground_to from ORIGINS config
+  if (!('t' in cellData)) {
+    // legacy verbose format — shouldn't happen with new data
+    return {
+      totalMinutes: cellData.time || 0,
+      breakdown: { groundTo: 0, overhead: 90, flight: 0, arrival: 60, groundFrom: 0, legs: [] },
+      route: { originAirport: 'N/A', destAirport: 'N/A', isDirect: true, stops: 0, path: [] },
+    };
+  }
+
+  if (cellData.d) {
+    // drive-only cell
+    return {
+      totalMinutes: cellData.t,
+      breakdown: { groundTo: cellData.t, overhead: 0, flight: 0, arrival: 0, groundFrom: 0, legs: [] },
+      route: { originAirport: 'drive', destAirport: 'drive', isDirect: true, stops: -1, path: [] },
+      osrm: !!cellData.g,  // true if ground time from OSRM road data
+    };
+  }
+
+  // flight cell — use route table for exact breakdown when available
+  const destCode = cellData.a || 'N/A';
+  const stops = cellData.s || 0;
+  const routeInfo = LOADED_ROUTE_TABLE?.[destCode];
+
+  if (routeInfo) {
+    // EXACT breakdown from route table
+    // routeInfo: {p: [path], l: [leg_times], t: dijkstra_total, s: stops}
+    const originCode = routeInfo.p[0];  // first airport in path
+
+    // ground_to from ORIGINS config
     const originCity = ORIGINS[currentOrigin];
     let groundTo = 0;
     if (originCity) {
@@ -584,39 +689,59 @@ function parseCellData(cellData) {
         groundTo = alt?.groundTimeMinutes || 0;
       }
     }
+
     const overhead = 90;
-    const connections = stops * 120; // 90min connection + 30min penalty per stop
-    // arrival: check if international
+    // arrival overhead: domestic 30m, international 60m
     const originCountry = LOADED_AIRPORTS?.[originCode]?.country || '';
     const destCountry = LOADED_AIRPORTS?.[destCode]?.country || '';
     const arrival = (originCountry && destCountry && originCountry === destCountry) ? 30 : 60;
-    // flight = total - ground_to - overhead - connections - arrival - ground_from
-    // we don't know ground_from exactly, so estimate flight as residual
-    const knownOverhead = groundTo + overhead + connections + arrival;
-    const flight = Math.max(0, cellData.t - knownOverhead); // includes ground_from
+    // ground_from is EXACT: total cell time minus dijkstra total minus arrival
+    const groundFrom = Math.max(0, cellData.t - routeInfo.t - arrival);
+
     return {
       totalMinutes: cellData.t,
-      breakdown: { groundTo, overhead, flight, arrival, groundFrom: 0 },
-      route: { originAirport: originCode, destAirport: destCode, isDirect: stops === 0, stops, path: [] },
+      breakdown: {
+        groundTo,
+        overhead,
+        flight: routeInfo.l.reduce((a, b) => a + b, 0),  // sum of per-leg times
+        arrival,
+        groundFrom,
+        legs: routeInfo.l,  // per-leg flight times [105, 660]
+      },
+      route: {
+        originAirport: originCode,
+        destAirport: destCode,
+        isDirect: stops === 0,
+        stops,
+        path: routeInfo.p,  // full airport sequence ["LHR", "FRA", "NRT"]
+      },
+      osrm: !!cellData.g,  // true if ground_from used OSRM road data
     };
   }
-  // verbose format (legacy): {time, route: {origin_airport, ...}}
-  return {
-    totalMinutes: cellData.time,
-    breakdown: {
-      groundTo: cellData.route?.ground_to || 0,
-      overhead: cellData.route?.overhead || 90,
-      flight: cellData.route?.flight || 0,
-      arrival: cellData.route?.arrival || 60,
-      groundFrom: cellData.route?.ground_from || 0,
-    },
-    route: {
-      originAirport: cellData.route?.origin_airport || 'N/A',
-      destAirport: cellData.route?.dest_airport || 'N/A',
-      isDirect: cellData.route?.is_direct !== false,
-      stops: cellData.route?.stops ?? 0,
-      path: cellData.route?.path || [],
+
+  // fallback: no route table, use residual estimation (legacy behavior)
+  const originCode = cellData.o || 'N/A';
+  const originCity = ORIGINS[currentOrigin];
+  let groundTo = 0;
+  if (originCity) {
+    if (originCity.nearestAirport?.code === originCode) {
+      groundTo = originCity.nearestAirport.groundTimeMinutes || 0;
+    } else {
+      const alt = originCity.alternativeAirports?.find(a => a.code === originCode);
+      groundTo = alt?.groundTimeMinutes || 0;
     }
+  }
+  const overhead = 90;
+  const connections = stops * 120;
+  const originCountry = LOADED_AIRPORTS?.[originCode]?.country || '';
+  const destCountry = LOADED_AIRPORTS?.[destCode]?.country || '';
+  const arrival = (originCountry && destCountry && originCountry === destCountry) ? 30 : 60;
+  const flight = Math.max(0, cellData.t - groundTo - overhead - connections - arrival);
+  return {
+    totalMinutes: cellData.t,
+    breakdown: { groundTo, overhead, flight, arrival, groundFrom: 0, legs: [] },
+    route: { originAirport: originCode, destAirport: destCode, isDirect: stops === 0, stops, path: [] },
+    osrm: !!cellData.g,
   };
 }
 
@@ -636,10 +761,7 @@ function getPrecomputedTravelTime(h3Cell, resolution) {
 // For res 1-4 we have pre-computed data. Instead of iterating a grid of cells
 // and checking each one, we directly iterate the pre-computed cells. This is
 // O(pre-computed cells) instead of O(viewport cells).
-//
-// Hybrid approach:
-// - res 1-4: direct render from pre-computed (fast)
-// - res 5+: fall back to grid iteration with on-demand compute
+// All resolutions (1-6) are pre-computed; res 5-6 lazy-loaded by viewport.
 // =============================================================================
 
 function generateHexGridDirect(origin, resolution, viewportBounds) {
@@ -695,9 +817,6 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
       const cellData = resData[h3Index];
       const result = parseCellData(cellData);
 
-      // cache it for tooltip lookups
-      setTravelTimeCache(h3Index, currentOrigin, result);
-
       const color = getTimeBandColor(result.totalMinutes);
       const boundary = h3.cellToBoundary(h3Index);
 
@@ -725,6 +844,7 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
           breakdown: result.breakdown,
           route: result.route,
           centroid: [centroid[1], centroid[0]],
+          osrm: result.osrm || false,
         },
         geometry: {
           type: 'Polygon',
@@ -743,38 +863,6 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
     type: 'FeatureCollection',
     features,
   };
-}
-
-function getAirportRegion(code) {
-  const country = LOADED_AIRPORTS?.[code]?.country || '';
-  return COUNTRY_TO_REGION[country] || 'other';
-}
-
-// check if route exists in loaded data
-function hasRoute(fromCode, toCode) {
-  if (!LOADED_ROUTES) return false;
-  return LOADED_ROUTES[fromCode]?.includes(toCode) ||
-         LOADED_ROUTES[toCode]?.includes(fromCode);
-}
-
-// estimate flight time from distance (used when we have route but no schedule)
-function estimateFlightMinutes(distKm) {
-  if (distKm < 500) return Math.round(distKm / 400 * 60 + 30);
-  if (distKm < 1500) return Math.round(distKm / 550 * 60 + 25);
-  if (distKm < 4000) return Math.round(distKm / 700 * 60 + 25);
-  if (distKm < 8000) return Math.round(distKm / 800 * 60 + 25);
-  return Math.round(distKm / 850 * 60 + 30);
-}
-
-// get ground time from OSRM data (lookup by H3 cell at res 6)
-function getOSRMGroundTime(airportCode, destLng, destLat) {
-  const region = getAirportRegion(airportCode);
-  const regionData = LOADED_GROUND[region];
-  if (!regionData || !regionData[airportCode]) return null;
-
-  // convert dest coords to H3 cell at res 6
-  const h3Cell = h3.latLngToCell(destLat, destLng, 6);
-  return regionData[airportCode][h3Cell] || null;
 }
 
 // =============================================================================
@@ -937,177 +1025,6 @@ const AIRPORTS = [
 ];
 
 // =============================================================================
-// DATA: Flight times (minutes) - major routes
-// =============================================================================
-const FLIGHT_TIMES = {
-  // From London Heathrow
-  'LHR': {
-    // Europe
-    'CDG': 75, 'ORY': 80, 'AMS': 75, 'FRA': 95, 'MUC': 115,
-    'MAD': 155, 'BCN': 120, 'FCO': 150, 'MXP': 115, 'ZRH': 100,
-    'GVA': 95, 'VIE': 140, 'BRU': 65, 'DUB': 80, 'LIS': 165,
-    'ATH': 230, 'CPH': 110, 'OSL': 120, 'ARN': 145, 'HEL': 180,
-    'WAW': 160, 'PRG': 120, 'BUD': 155, 'IST': 240,
-    // Middle East
-    'DXB': 420, 'DOH': 400, 'AUH': 430, 'TLV': 290, 'CAI': 300,
-    // Asia
-    'SIN': 780, 'HKG': 720, 'NRT': 720, 'HND': 730, 'ICN': 690,
-    'PEK': 600, 'PVG': 720, 'BKK': 690, 'KUL': 780, 'DEL': 510, 'BOM': 540,
-    // North America
-    'JFK': 480, 'EWR': 485, 'LAX': 660, 'SFO': 660, 'ORD': 540,
-    'DFW': 600, 'MIA': 570, 'ATL': 570, 'SEA': 600, 'BOS': 450,
-    'DEN': 600, 'YYZ': 480, 'YVR': 600, 'YUL': 420,
-    // South America
-    'GRU': 720, 'EZE': 840, 'SCL': 900, 'BOG': 660, 'LIM': 780,
-    // Africa
-    'JNB': 660, 'CPT': 720, 'NBO': 510, 'ADD': 480, 'LOS': 390, 'CMN': 210,
-    // Oceania
-    'SYD': 1320, 'MEL': 1350, 'BNE': 1380, 'PER': 1080, 'AKL': 1500,
-    // UK domestic
-    'EDI': 80, 'GLA': 85, 'MAN': 55, 'BRS': 45, 'BHX': 50,
-  },
-
-  // From Bristol (regional + some long haul via codeshare)
-  'BRS': {
-    'DUB': 60, 'EDI': 75, 'GLA': 80,
-    'AMS': 85, 'CDG': 95, 'BRU': 80,
-    'MAD': 165, 'BCN': 135, 'LIS': 175,
-    'FAO': 180, 'AGP': 170, 'PMI': 150,
-    'NCE': 125, 'GVA': 110, 'ZRH': 110,
-    'FRA': 100, 'MUC': 120, 'VIE': 140,
-    'CPH': 115, 'ARN': 150,
-    'JFK': 510, // seasonal direct
-  },
-
-  // From London Gatwick
-  'LGW': {
-    'JFK': 490, 'MCO': 540, 'LAX': 680,
-    'BCN': 120, 'PMI': 135, 'TFS': 270,
-    'AGP': 170, 'FAO': 175, 'LIS': 165,
-    'CDG': 80, 'AMS': 80, 'GVA': 100,
-    'DUB': 85, 'EDI': 90,
-  },
-
-  // From Manchester
-  'MAN': {
-    'JFK': 480, 'LAX': 660, 'ATL': 540,
-    'DXB': 450, 'SIN': 810,
-    'CDG': 90, 'AMS': 80, 'FRA': 100,
-    'BCN': 135, 'MAD': 155,
-    'DUB': 55, 'EDI': 55,
-  },
-
-  // From JFK
-  'JFK': {
-    'LHR': 420, 'LGW': 430, 'CDG': 450, 'AMS': 460, 'FRA': 490,
-    'MAD': 480, 'FCO': 540, 'DUB': 390, 'MUC': 540,
-    'LAX': 330, 'SFO': 360, 'ORD': 150, 'MIA': 180, 'ATL': 140,
-    'DFW': 210, 'DEN': 240, 'SEA': 330, 'BOS': 75,
-    'YYZ': 90, 'YVR': 330, 'YUL': 85, 'MEX': 300,
-    'GRU': 600, 'EZE': 660,
-    'NRT': 840, 'HKG': 960, 'SIN': 1080,
-    'DXB': 780, 'DOH': 780,
-  },
-
-  // From CDG (Paris)
-  'CDG': {
-    'LHR': 75, 'AMS': 70, 'FRA': 70, 'MAD': 120, 'BCN': 95,
-    'FCO': 120, 'MXP': 85, 'ZRH': 75, 'GVA': 70, 'BRU': 55,
-    'VIE': 120, 'PRG': 100, 'WAW': 140, 'BUD': 130,
-    'JFK': 480, 'LAX': 720, 'YYZ': 480,
-    'DXB': 390, 'DOH': 390,
-    'NRT': 720, 'HKG': 720, 'SIN': 780, 'BKK': 660,
-    'JNB': 660,
-  },
-
-  // From Dubai
-  'DXB': {
-    'LHR': 420, 'CDG': 390, 'FRA': 360, 'AMS': 420,
-    'JFK': 840, 'LAX': 960,
-    'SIN': 420, 'HKG': 480, 'BKK': 360, 'DEL': 210, 'BOM': 180,
-    'NRT': 660, 'ICN': 540,
-    'SYD': 840, 'MEL': 870,
-    'JNB': 480, 'NBO': 300,
-  },
-
-  // From Singapore
-  'SIN': {
-    'LHR': 780, 'CDG': 780, 'FRA': 750,
-    'JFK': 1140, 'LAX': 1020, 'SFO': 1020,
-    'DXB': 420, 'DOH': 480,
-    'HKG': 240, 'NRT': 420, 'ICN': 360, 'PEK': 360, 'PVG': 300,
-    'BKK': 150, 'KUL': 60, 'DEL': 330, 'BOM': 330,
-    'SYD': 480, 'MEL': 480, 'PER': 300, 'AKL': 600,
-  },
-
-  // From Sydney
-  'SYD': {
-    'LHR': 1320, 'DXB': 840, 'SIN': 480, 'HKG': 540, 'NRT': 600,
-    'LAX': 840, 'SFO': 840,
-    'AKL': 210, 'MEL': 90, 'BNE': 90, 'PER': 300,
-  },
-
-  // From Tokyo Narita/Haneda
-  'NRT': {
-    'LHR': 720, 'CDG': 720, 'FRA': 720,
-    'JFK': 780, 'LAX': 660, 'SFO': 600, 'ORD': 720,
-    'SIN': 420, 'HKG': 300, 'ICN': 150, 'PEK': 210, 'PVG': 180,
-    'BKK': 360, 'DEL': 540,
-    'SYD': 600, 'AKL': 660,
-    'DXB': 660, 'DOH': 720,
-  },
-
-  'HND': {
-    'LHR': 730, 'CDG': 730, 'FRA': 730,
-    'JFK': 800, 'LAX': 680, 'SFO': 620,
-    'SIN': 430, 'HKG': 280, 'ICN': 150, 'PEK': 220, 'PVG': 190,
-    'SYD': 600,
-  },
-
-  // From Hong Kong
-  'HKG': {
-    'LHR': 720, 'CDG': 720, 'FRA': 720, 'AMS': 720,
-    'JFK': 960, 'LAX': 780, 'SFO': 750, 'YVR': 660,
-    'SIN': 240, 'BKK': 180, 'NRT': 300, 'ICN': 210, 'PEK': 210, 'PVG': 150,
-    'DEL': 360, 'BOM': 360,
-    'SYD': 540, 'MEL': 570,
-    'DXB': 480, 'DOH': 540,
-  },
-
-  // From Frankfurt (major European hub)
-  'FRA': {
-    'LHR': 95, 'CDG': 70, 'AMS': 70, 'ZRH': 55, 'VIE': 80, 'MUC': 50,
-    'MAD': 155, 'BCN': 120, 'FCO': 110, 'ATH': 180, 'IST': 180,
-    'JFK': 540, 'LAX': 720, 'ORD': 600, 'YYZ': 540,
-    'DXB': 360, 'DOH': 360, 'TLV': 240,
-    'SIN': 720, 'HKG': 660, 'NRT': 720, 'ICN': 660, 'PEK': 600, 'DEL': 480,
-    'JNB': 660, 'CPT': 720,
-    'GRU': 720, 'EZE': 840,
-  },
-
-  // From Amsterdam (major hub)
-  'AMS': {
-    'LHR': 75, 'CDG': 70, 'FRA': 70, 'ZRH': 85, 'MUC': 85,
-    'MAD': 150, 'BCN': 120, 'FCO': 140, 'ATH': 195,
-    'JFK': 480, 'LAX': 660, 'SFO': 660, 'ORD': 540, 'YYZ': 480,
-    'DXB': 390, 'DOH': 390,
-    'SIN': 750, 'HKG': 690, 'NRT': 690, 'ICN': 660, 'PEK': 600,
-    'JNB': 660, 'CPT': 720,
-  },
-
-  // From Los Angeles
-  'LAX': {
-    'LHR': 660, 'CDG': 720, 'FRA': 720, 'AMS': 660,
-    'JFK': 330, 'SFO': 90, 'ORD': 240, 'DFW': 180, 'DEN': 150, 'SEA': 150,
-    'MIA': 300, 'ATL': 270, 'BOS': 330,
-    'YYZ': 300, 'YVR': 180, 'MEX': 210,
-    'NRT': 660, 'HKG': 780, 'SIN': 1020, 'ICN': 720, 'PEK': 780,
-    'SYD': 840, 'AKL': 780,
-    'DXB': 960,
-  },
-};
-
-// =============================================================================
 // TIME BANDS (Galton-style colors)
 // =============================================================================
 const TIME_BANDS = [
@@ -1122,6 +1039,9 @@ const TIME_BANDS = [
   { maxHours: 24, color: '#4c1d95', label: '18-24h' },   // deep purple
   { maxHours: Infinity, color: '#1e1b4b', label: '24h+' }, // near black purple
 ];
+
+// color scale: multiplier on band thresholds (higher = more green)
+let colorScale = 1.0;
 
 // =============================================================================
 // UTILITIES
@@ -1140,43 +1060,6 @@ function haversineDistance(coord1, coord2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
   return R * c;
-}
-
-function estimateGroundTime(fromCoords, toCoords) {
-  const distanceKm = haversineDistance(fromCoords, toCoords);
-  // Average suburban speed ~40 km/h
-  return Math.round((distanceKm / 40) * 60);
-}
-
-function getFlightTime(fromCode, toCode) {
-  // Check hardcoded times first (known accurate times)
-  if (FLIGHT_TIMES[fromCode]?.[toCode]) {
-    return FLIGHT_TIMES[fromCode][toCode];
-  }
-  if (FLIGHT_TIMES[toCode]?.[fromCode]) {
-    return FLIGHT_TIMES[toCode][fromCode];
-  }
-
-  // Check loaded route data - if route exists, estimate time from distance
-  if (DATA_LOADED && hasRoute(fromCode, toCode)) {
-    const fromApt = LOADED_AIRPORTS[fromCode];
-    const toApt = LOADED_AIRPORTS[toCode];
-    if (fromApt && toApt) {
-      const dist = haversineDistance([fromApt.lng, fromApt.lat], [toApt.lng, toApt.lat]);
-      return estimateFlightMinutes(dist);
-    }
-  }
-
-  return null;
-}
-
-function estimateFlightFromDistance(fromCoords, toCoords) {
-  const distanceKm = haversineDistance(fromCoords, toCoords);
-  const isShortHaul = distanceKm < 1500;
-  const effectiveSpeed = isShortHaul ? 600 : 800;
-  const flightMin = (distanceKm / effectiveSpeed) * 60;
-  const fixedOverhead = 25;
-  return Math.round(flightMin + fixedOverhead);
 }
 
 function formatTime(minutes) {
@@ -1202,352 +1085,59 @@ function toggleInfoPanel() {
 function getTimeBandColor(totalMinutes) {
   const hours = totalMinutes / 60;
   for (const band of TIME_BANDS) {
-    if (hours < band.maxHours) {
+    // scale thresholds: higher colorScale = wider bands = more green
+    if (hours < band.maxHours * colorScale) {
       return band.color;
     }
   }
   return TIME_BANDS[TIME_BANDS.length - 1].color;
 }
 
-// =============================================================================
-// TRAVEL TIME CALCULATION
-// =============================================================================
-
-function findNearestAirport(coords) {
-  let nearest = null;
-  let minDist = Infinity;
-
-  for (const airport of AIRPORTS) {
-    const dist = haversineDistance(coords, airport.coordinates);
-    if (dist < minDist) {
-      minDist = dist;
-      nearest = airport;
-    }
+// recolor existing grid features without regenerating geometry
+function recolorGrid() {
+  if (!gridData || !map) return;
+  for (const f of gridData.features) {
+    f.properties.color = getTimeBandColor(f.properties.travelTimeMinutes);
   }
-
-  return { airport: nearest, distance: minDist };
+  map.getSource('hexgrid').setData(gridData);
 }
 
-// cache for converted airports array (avoid recreating every call)
-let _airportsArrayCache = null;
-let _airportSpatialIndex = null;  // H3 cell -> airports in that cell
-const SPATIAL_INDEX_RES = 3;      // coarse res for fast lookup (~180km cells)
-
-function getAirportsArray() {
-  if (_airportsArrayCache) return _airportsArrayCache;
-
-  if (DATA_LOADED && LOADED_AIRPORTS) {
-    _airportsArrayCache = Object.entries(LOADED_AIRPORTS).map(([code, data]) => ({
-      code,
-      name: data.name,
-      coordinates: [data.lng, data.lat],
-      country: data.country,
-    }));
-  } else {
-    _airportsArrayCache = AIRPORTS;
-  }
-  return _airportsArrayCache;
+// update legend labels to reflect current color scale
+function updateLegend() {
+  const items = document.querySelectorAll('.legend-item');
+  TIME_BANDS.forEach((band, i) => {
+    if (!items[i]) return;
+    const scaled = band.maxHours * colorScale;
+    const prev = i > 0 ? TIME_BANDS[i - 1].maxHours * colorScale : 0;
+    let label;
+    if (i === 0) {
+      label = `< ${formatBandHours(scaled)}`;
+    } else if (band.maxHours === Infinity) {
+      label = `${formatBandHours(prev)}+`;
+    } else {
+      label = `${formatBandHours(prev)}-${formatBandHours(scaled)}`;
+    }
+    // update just the text node (after the color swatch div)
+    const textNode = items[i].childNodes[1];
+    if (textNode) textNode.textContent = ' ' + label;
+  });
 }
 
-function buildAirportSpatialIndex() {
-  if (_airportSpatialIndex) return _airportSpatialIndex;
-
-  console.log('[PERF] Building airport spatial index...');
-  const start = performance.now();
-  _airportSpatialIndex = {};
-
-  const airports = getAirportsArray();
-  for (const airport of airports) {
-    const cell = h3.latLngToCell(airport.coordinates[1], airport.coordinates[0], SPATIAL_INDEX_RES);
-    if (!_airportSpatialIndex[cell]) _airportSpatialIndex[cell] = [];
-    _airportSpatialIndex[cell].push(airport);
-  }
-
-  console.log(`[PERF] Spatial index built in ${(performance.now() - start).toFixed(0)}ms (${Object.keys(_airportSpatialIndex).length} cells)`);
-  return _airportSpatialIndex;
-}
-
-function findNearestAirports(coords, count = 10) {
-  // Use spatial index for fast lookup
-  const index = buildAirportSpatialIndex();
-
-  // Get the cell for this coordinate and expand to neighboring cells
-  const centerCell = h3.latLngToCell(coords[1], coords[0], SPATIAL_INDEX_RES);
-
-  // Start with k=1 ring, expand if needed
-  let candidates = [];
-  let k = 1;
-  const maxK = 5;  // max ~900km search radius
-
-  while (candidates.length < count * 2 && k <= maxK) {
-    const cells = h3.gridDisk(centerCell, k);
-    candidates = [];
-    for (const cell of cells) {
-      if (index[cell]) {
-        candidates.push(...index[cell]);
-      }
-    }
-    k++;
-  }
-
-  // If still not enough, fall back to full search (rare, remote areas)
-  if (candidates.length < count) {
-    candidates = getAirportsArray();
-  }
-
-  // Calculate distances and sort
-  const airportsWithDist = candidates.map(airport => ({
-    airport,
-    distance: haversineDistance(coords, airport.coordinates)
-  }));
-
-  airportsWithDist.sort((a, b) => a.distance - b.distance);
-
-  return airportsWithDist.slice(0, count);
-}
-
-// airport code -> coordinates lookup (built on first use)
-let _airportCoordsLookup = null;
-function getAirportCoords(code) {
-  if (!_airportCoordsLookup) {
-    _airportCoordsLookup = {};
-    for (const apt of getAirportsArray()) {
-      _airportCoordsLookup[apt.code] = apt.coordinates;
-    }
-    // also add from AIRPORTS (hardcoded)
-    for (const apt of AIRPORTS) {
-      _airportCoordsLookup[apt.code] = apt.coordinates;
-    }
-  }
-  return _airportCoordsLookup[code];
-}
-
-function calculateTotalTravelTime(origin, destCoords) {
-  // If very close to origin (< 50km), just use ground transport
-  const distFromOrigin = haversineDistance(origin.coordinates, destCoords);
-  if (distFromOrigin < 50) {
-    return {
-      totalMinutes: estimateGroundTime(origin.coordinates, destCoords),
-      breakdown: {
-        groundTo: 0,
-        overhead: 0,
-        flight: 0,
-        arrival: 0,
-        groundFrom: estimateGroundTime(origin.coordinates, destCoords),
-      },
-      route: {
-        originAirport: null,
-        destAirport: null,
-        isDirect: true,
-      }
-    };
-  }
-
-  // Find nearest airports to destination (5 is enough, 10 was overkill)
-  const nearestDestAirports = findNearestAirports(destCoords, 5);
-  const allOriginAirports = [origin.nearestAirport, ...origin.alternativeAirports];
-
-  let bestResult = null;
-  let bestTime = Infinity;
-
-  // Try combinations of origin airports and destination airports
-  for (const originAirport of allOriginAirports) {
-    // early exit if we found a good route (< 4 hours)
-    if (bestTime < 240) break;
-
-    for (const { airport: destAirport, distance: destAirportDist } of nearestDestAirports) {
-      // Ground: origin → airport
-      const groundTo = originAirport.groundTimeMinutes;
-
-      // Airport overhead (security, boarding)
-      const airportOverhead = 90;
-
-      // Flight time - only use routes that actually exist
-      let flight = getFlightTime(originAirport.code, destAirport.code);
-
-      // No route exists - skip this origin-dest pair
-      // (don't estimate fake flights from distance)
-      if (flight === null) {
-        continue;
-      }
-
-      // Arrival overhead (deplane, customs if intl)
-      const isInternational = origin.nearestAirport.code.substring(0, 2) !== destAirport.code.substring(0, 2);
-      const arrivalOverhead = isInternational ? 60 : 30;
-
-      // Ground: destination airport → destination
-      // Try OSRM data first, fall back to haversine estimate
-      let groundFrom = getOSRMGroundTime(destAirport.code, destCoords[0], destCoords[1]);
-      if (groundFrom === null) {
-        groundFrom = Math.round((destAirportDist / 40) * 60);
-      }
-
-      const total = groundTo + airportOverhead + flight + arrivalOverhead + groundFrom;
-
-      if (total < bestTime) {
-        bestTime = total;
-        bestResult = {
-          totalMinutes: total,
-          breakdown: {
-            groundTo,
-            overhead: airportOverhead,
-            flight,
-            arrival: arrivalOverhead,
-            groundFrom,
-          },
-          route: {
-            originAirport: originAirport.code,
-            destAirport: destAirport.code,
-            isDirect: false,
-          }
-        };
-      }
-    }
-  }
-
-  return bestResult;
+function formatBandHours(h) {
+  if (h >= 100) return Math.round(h) + 'h';
+  if (h === Math.floor(h)) return h + 'h';
+  return h.toFixed(1) + 'h';
 }
 
 // =============================================================================
 // H3 GRID GENERATION
 // =============================================================================
 
+// all resolutions now precomputed — this is a thin wrapper for backward compat
+// (benchmark code calls generateHexGrid directly)
 function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
-  // HYBRID APPROACH:
-  // - res 1-4: try direct render from pre-computed data (fast path)
-  // - res 5+: grid iteration with on-demand compute (slower but necessary)
-  if (resolution <= 4 && LOADED_ISOCHRONE) {
-    const directResult = generateHexGridDirect(origin, resolution, viewportBounds);
-    if (directResult && directResult.features.length > 0) {
-      return directResult;
-    }
-    // fall through to grid iteration if direct failed
-  }
-
-  const features = [];
-  const timings = { cells: 0, findAirports: 0, calcTravel: 0, total: 0 };
-  const startTotal = performance.now();
-
-  // Resolution guide:
-  // Resolution 2 = ~86,000 km² per cell (very coarse, fast)
-  // Resolution 3 = ~12,000 km² per cell (good for global view)
-  // Resolution 4 = ~1,700 km² per cell (better detail)
-  // Resolution 5 = ~252 km² per cell (high detail, slower)
-
-  // Use viewport bounds if provided, otherwise full world
-  const bounds = viewportBounds || {
-    north: 75,
-    south: -55,
-    east: 180,
-    west: -180,
-  };
-
-  // Add padding to bounds to avoid edge artifacts (10% padding)
-  const latPadding = (bounds.north - bounds.south) * 0.1;
-  const lngPadding = (bounds.east - bounds.west) * 0.1;
-  const paddedBounds = {
-    north: Math.min(85, bounds.north + latPadding),
-    south: Math.max(-85, bounds.south - latPadding),
-    east: Math.min(180, bounds.east + lngPadding),
-    west: Math.max(-180, bounds.west - lngPadding),
-  };
-
-  // Sampling density based on resolution
-  // Step should be smaller than cell size to ensure complete coverage
-  // H3 cell sizes: res2 ~500km, res3 ~180km, res4 ~70km, res5 ~25km, res6 ~10km
-  const stepMap = { 2: 1.2, 3: 0.45, 4: 0.12, 5: 0.035, 6: 0.01 };
-  const step = stepMap[resolution] || 0.12;
-
-  const seenCells = new Set();
-
-  for (let lat = paddedBounds.south; lat <= paddedBounds.north; lat += step) {
-    for (let lng = paddedBounds.west; lng <= paddedBounds.east; lng += step) {
-      try {
-        const h3Index = h3.latLngToCell(lat, lng, resolution);
-
-        if (seenCells.has(h3Index)) continue;
-        seenCells.add(h3Index);
-
-        const boundary = h3.cellToBoundary(h3Index);
-        const centroid = h3.cellToLatLng(h3Index);
-
-        // Calculate travel time (with caching and pre-computed data)
-        const calcStart = performance.now();
-        let result = getTravelTimeFromCache(h3Index, currentOrigin);
-        if (!result) {
-          // Try pre-computed data first (fast path)
-          result = getPrecomputedTravelTime(h3Index, resolution);
-          if (result) {
-            setTravelTimeCache(h3Index, currentOrigin, result);
-          } else {
-            // Quick check: if nearest airport is >300km away, likely water/remote - skip
-            const destCoords = [centroid[1], centroid[0]];
-            const nearestAirports = findNearestAirports(destCoords, 1);
-            if (nearestAirports.length > 0 && nearestAirports[0].distance > 300) {
-              // Skip water/remote cells - don't compute or render
-              timings.calcTravel += performance.now() - calcStart;
-              timings.cells++;
-              continue;
-            }
-            result = calculateTotalTravelTime(origin, destCoords);
-            setTravelTimeCache(h3Index, currentOrigin, result);
-          }
-        }
-        timings.calcTravel += performance.now() - calcStart;
-        timings.cells++;
-
-        if (result) {
-          const color = getTimeBandColor(result.totalMinutes);
-
-          // Convert boundary to GeoJSON coordinates [lng, lat]
-          let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
-
-          // Check if cell crosses antimeridian (has both large positive and negative longitudes)
-          const lngs = coordinates.map(c => c[0]);
-          const hasPositive = lngs.some(lng => lng > 90);
-          const hasNegative = lngs.some(lng => lng < -90);
-
-          if (hasPositive && hasNegative) {
-            // Normalize: shift negative longitudes to positive side (>180)
-            // This keeps the polygon contiguous for rendering
-            coordinates = coordinates.map(([lng, lat]) => [
-              lng < 0 ? lng + 360 : lng,
-              lat
-            ]);
-          }
-
-          coordinates.push(coordinates[0]); // Close the polygon
-
-          features.push({
-            type: 'Feature',
-            properties: {
-              h3Index,
-              travelTimeMinutes: result.totalMinutes,
-              color,
-              breakdown: result.breakdown,
-              route: result.route,
-              centroid: [centroid[1], centroid[0]],
-            },
-            geometry: {
-              type: 'Polygon',
-              coordinates: [coordinates],
-            }
-          });
-        }
-      } catch (e) {
-        // Skip invalid cells
-      }
-    }
-  }
-
-  timings.total = performance.now() - startTotal;
-  console.log(`[PERF] Grid generation: ${timings.cells} cells in ${timings.total.toFixed(0)}ms`);
-  console.log(`[PERF]   calcTravel: ${timings.calcTravel.toFixed(0)}ms (${(timings.calcTravel/timings.cells).toFixed(2)}ms/cell)`);
-
-  return {
-    type: 'FeatureCollection',
-    features,
-  };
+  return generateHexGridDirect(origin, resolution, viewportBounds) ||
+         { type: 'FeatureCollection', features: [] };
 }
 
 // =============================================================================
@@ -1561,28 +1151,23 @@ let currentResolution = 3;
 let isUpdatingGrid = false;
 
 function getResolutionForZoom(zoom) {
-  // res 1-4: precomputed from JSON (<100ms) — use aggressively
-  // res 5-6: on-demand grid iteration (100ms-1800ms) — keep conservative
-  //
-  // previous thresholds: 1.5/2.5/4/5.5/7
-  if (zoom < 1) return 1;       // far globe: res 1 (was <1.5)
-  if (zoom < 2) return 2;       // globe: res 2 (was <2.5)
-  if (zoom < 3) return 3;       // continental: res 3 (was <4)
-  if (zoom < 5) return 4;       // regional: res 4, precomputed (was <5.5)
-  if (zoom < 6.5) return 5;     // local: res 5, on-demand (was <7)
-  return 6;                      // street: res 6, on-demand
+  // all resolutions precomputed: res 1-4 in base JSON, res 5-6 lazy-loaded chunks
+  if (zoom < 1) return 1;       // far globe: res 1
+  if (zoom < 2) return 2;       // globe: res 2
+  if (zoom < 4.5) return 4;     // regional: res 4 (res 3 skipped — too coarse)
+  if (zoom < 6.5) return 5;     // local: res 5 (chunked)
+  return 6;                      // street: res 6 (chunked)
 }
 
 async function initMap() {
-  // load external data (airports, routes, ground times)
+  // load external data (airports, routes)
   await loadJetSpanData();
 
-  // preload ground data for origin's region
-  const originRegion = COUNTRY_TO_REGION['GB'] || 'europe';  // default to europe for bristol
-  await loadGroundData(originRegion);
-
-  // load pre-computed isochrone data for current origin (if available)
-  await loadIsochroneData(currentOrigin);
+  // load pre-computed isochrone data + route table for current origin
+  await Promise.all([
+    loadIsochroneData(currentOrigin),
+    loadRouteTable(currentOrigin),
+  ]);
 
   map = new maplibregl.Map({
     container: 'map',
@@ -1665,13 +1250,25 @@ async function initMap() {
       paint: {
         'circle-radius': [
           'interpolate', ['linear'], ['zoom'],
-          2, 3,
-          5, 5,
-          8, 8
+          0, 1.5,    // tiny dots at globe view (3000+ airports)
+          3, 2,
+          5, 3.5,
+          8, 6
         ],
         'circle-color': '#ffffff',
         'circle-stroke-color': '#1a1a1a',
-        'circle-stroke-width': 2,
+        'circle-stroke-width': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 0.5,
+          5, 1.5,
+          8, 2
+        ],
+        'circle-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 0.5,
+          4, 0.8,
+          6, 1
+        ],
       }
     });
 
@@ -1679,13 +1276,15 @@ async function initMap() {
       id: 'airport-labels',
       type: 'symbol',
       source: 'airports',
-      minzoom: 4,
+      minzoom: 5,  // labels only at higher zoom (3000+ airports)
       layout: {
         'text-field': ['get', 'code'],
-        'text-size': 11,
-        'text-offset': [0, 1.5],
+        'text-size': 10,
+        'text-offset': [0, 1.2],
         'text-anchor': 'top',
         'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+        'text-allow-overlap': false,
+        'text-optional': true,
       },
       paint: {
         'text-color': '#ffffff',
@@ -1737,15 +1336,59 @@ async function initMap() {
       }
     });
 
+    // Route line visualization — shows flight path on hover
+    map.addSource('route-line', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+
+    // solid line for flight legs (airport → airport)
+    map.addLayer({
+      id: 'route-line-flights',
+      type: 'line',
+      source: 'route-line',
+      filter: ['==', ['get', 'segment'], 'flight'],
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': 2.5,
+        'line-opacity': 0.85
+      }
+    });
+
+    // lighter dashed line for ground segment (last airport → cell centroid)
+    map.addLayer({
+      id: 'route-line-ground',
+      type: 'line',
+      source: 'route-line',
+      filter: ['==', ['get', 'segment'], 'ground'],
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': 1.5,
+        'line-opacity': 0.4,
+        'line-dasharray': [4, 3]
+      }
+    });
+
     // Interaction
     map.on('mousemove', 'hexgrid-fill', (e) => {
       if (e.features.length > 0) {
-        showTooltip(e.features[0].properties);
+        const props = e.features[0].properties;
+        showTooltip(props);
+        // draw route line on hover
+        try {
+          const route = JSON.parse(props.route);
+          const centroid = JSON.parse(props.centroid);
+          if (route && route.path) {
+            map.getSource('route-line').setData(buildRouteGeoJSON(route, centroid));
+          }
+        } catch(e) {} // drive-only cells may lack route
       }
     });
 
     map.on('mouseleave', 'hexgrid-fill', () => {
       hideTooltip();
+      // clear route line
+      map.getSource('route-line').setData({ type: 'FeatureCollection', features: [] });
     });
 
     // Dynamic resolution and viewport-based rendering
@@ -1786,19 +1429,43 @@ async function initMap() {
 }
 
 function generateAirportGeoJSON() {
+  // show all airports reachable via route table (3000+)
+  // falls back to hardcoded AIRPORTS if data not loaded yet
+  if (LOADED_AIRPORTS && LOADED_ROUTE_TABLE) {
+    const features = [];
+    for (const code of Object.keys(LOADED_ROUTE_TABLE)) {
+      const apt = LOADED_AIRPORTS[code];
+      if (!apt) continue;
+      features.push({
+        type: 'Feature',
+        properties: { code, name: apt.name || code, country: apt.country || '' },
+        geometry: { type: 'Point', coordinates: [apt.lng, apt.lat] },
+      });
+    }
+    // also add origin airports from ORIGINS config
+    const origin = ORIGINS[currentOrigin];
+    if (origin) {
+      const originAirports = [origin.nearestAirport, ...(origin.alternativeAirports || [])];
+      for (const aptCfg of originAirports) {
+        const apt = LOADED_AIRPORTS[aptCfg.code];
+        if (apt && !LOADED_ROUTE_TABLE[aptCfg.code]) {
+          features.push({
+            type: 'Feature',
+            properties: { code: aptCfg.code, name: apt.name || aptCfg.code, country: apt.country || '' },
+            geometry: { type: 'Point', coordinates: [apt.lng, apt.lat] },
+          });
+        }
+      }
+    }
+    return { type: 'FeatureCollection', features };
+  }
+  // fallback: hardcoded list
   return {
     type: 'FeatureCollection',
     features: AIRPORTS.map(airport => ({
       type: 'Feature',
-      properties: {
-        code: airport.code,
-        name: airport.name,
-        country: airport.country,
-      },
-      geometry: {
-        type: 'Point',
-        coordinates: airport.coordinates,
-      }
+      properties: { code: airport.code, name: airport.name, country: airport.country },
+      geometry: { type: 'Point', coordinates: airport.coordinates },
     })),
   };
 }
@@ -1815,65 +1482,71 @@ function generateOriginGeoJSON() {
   };
 }
 
-function updateGrid(resolution = currentResolution, flyToOrigin = true) {
+async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
   if (isUpdatingGrid) return;
   isUpdatingGrid = true;
 
-  // Only show loading overlay for major changes (origin switch), not for pan/zoom
+  // only show loading overlay for major changes (origin switch), not for pan/zoom
   const showLoading = flyToOrigin;
   if (showLoading) {
     document.getElementById('loading').classList.remove('hidden');
   }
 
-  // Use requestAnimationFrame for smoother updates
-  requestAnimationFrame(() => {
-    const origin = ORIGINS[currentOrigin];
-    currentResolution = resolution;
+  const origin = ORIGINS[currentOrigin];
+  currentResolution = resolution;
 
-    // Get viewport bounds for efficient rendering
-    // Note: getBounds() is unreliable in globe projection at low zoom
-    let viewportBounds = null;
-    const zoom = map ? map.getZoom() : 0;
+  // get viewport bounds for efficient rendering
+  // getBounds() is unreliable in globe projection at low zoom
+  let viewportBounds = null;
+  const zoom = map ? map.getZoom() : 0;
 
-    if (map && map.getBounds && zoom >= 3) {
-      // Only use viewport bounds at higher zoom where projection is reliable
-      const bounds = map.getBounds();
-      const north = bounds.getNorth();
-      const south = bounds.getSouth();
-      const east = bounds.getEast();
-      const west = bounds.getWest();
+  if (map && map.getBounds && zoom >= 3) {
+    const bounds = map.getBounds();
+    const north = bounds.getNorth();
+    const south = bounds.getSouth();
+    const east = bounds.getEast();
+    const west = bounds.getWest();
 
-      // Validate bounds (avoid antimeridian wrap issues)
-      if (north > south && Math.abs(east - west) < 360) {
-        viewportBounds = { north, south, east, west };
-      }
+    if (north > south && Math.abs(east - west) < 360) {
+      viewportBounds = { north, south, east, west };
     }
-    // At low zoom (globe view), viewportBounds stays null = render full world
+  }
 
-    gridData = generateHexGrid(origin, resolution, viewportBounds);
+  // for chunked resolutions (5-6), load needed chunks before rendering
+  if (resolution >= 5 && LOADED_ISOCHRONE && viewportBounds) {
+    await loadChunksForViewport(resolution, viewportBounds);
+  }
 
-    map.getSource('hexgrid').setData(gridData);
-    map.getSource('origin').setData(generateOriginGeoJSON());
+  // render: direct from precomputed data at all resolutions
+  gridData = generateHexGridDirect(origin, resolution, viewportBounds);
+  if (!gridData || gridData.features.length === 0) {
+    // fallback for edge cases (no data loaded yet)
+    gridData = { type: 'FeatureCollection', features: [] };
+  }
 
-    // Update stats
-    document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
-    document.getElementById('stat-zoom').textContent = zoom.toFixed(1);
-    document.getElementById('stat-res').textContent = resolution;
+  map.getSource('hexgrid').setData(gridData);
+  map.getSource('origin').setData(generateOriginGeoJSON());
 
-    // Only fly to origin when origin changes, not on resolution change
-    if (flyToOrigin) {
-      map.flyTo({
-        center: origin.coordinates,
-        zoom: 4,
-        duration: 1000,
-      });
-    }
+  // update stats
+  document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
+  document.getElementById('stat-zoom').textContent = zoom.toFixed(1);
+  document.getElementById('stat-res').textContent = resolution;
+  const center = map.getCenter();
+  document.getElementById('stat-center').textContent =
+    `${center.lat.toFixed(3)}, ${center.lng.toFixed(3)}`;
 
-    if (showLoading) {
-      document.getElementById('loading').classList.add('hidden');
-    }
-    isUpdatingGrid = false;
-  });
+  if (flyToOrigin) {
+    map.flyTo({
+      center: origin.coordinates,
+      zoom: 4,
+      duration: 1000,
+    });
+  }
+
+  if (showLoading) {
+    document.getElementById('loading').classList.add('hidden');
+  }
+  isUpdatingGrid = false;
 }
 
 // =============================================================================
@@ -1930,13 +1603,12 @@ async function runBenchmark() {
       times.push({ms: performance.now() - t0, cells: grid.features.length});
     }
     const avgMs = times.reduce((s, t) => s + t.ms, 0) / times.length;
-    const path = res <= 4 && LOADED_ISOCHRONE ? 'precomputed' : 'on-demand';
     results.push({
-      test: 'zoom', zoom: z, res, cells: times[0].cells, path,
+      test: 'zoom', zoom: z, res, cells: times[0].cells, path: 'precomputed',
       avgMs: +avgMs.toFixed(1), minMs: +Math.min(...times.map(t=>t.ms)).toFixed(1),
       maxMs: +Math.max(...times.map(t=>t.ms)).toFixed(1),
     });
-    showStatus(`ZOOM z=${z} → res ${res} (${path}): ${avgMs.toFixed(0)}ms, ${times[0].cells} cells`);
+    showStatus(`ZOOM z=${z} → res ${res} (precomputed): ${avgMs.toFixed(0)}ms, ${times[0].cells} cells`);
     await new Promise(r => setTimeout(r, 400)); // pause so user can read
   }
 
@@ -1947,7 +1619,7 @@ async function runBenchmark() {
     {name: 'reykjavik', coords: [-21.9, 64.14]},
     {name: 'istanbul', coords: [28.98, 41.01]},
   ];
-  const panZooms = [4, 5.5, 7]; // one precomputed, one boundary, one on-demand
+  const panZooms = [4, 5.5, 7];
   for (const z of panZooms) {
     for (const tgt of panTargets) {
       showStatus(`PAN TEST: z=${z} → ${tgt.name} ...`);
@@ -1969,9 +1641,8 @@ async function runBenchmark() {
         times.push({ms: performance.now() - t0, cells: grid.features.length});
       }
       const avgMs = times.reduce((s, t) => s + t.ms, 0) / times.length;
-      const path = res <= 4 && LOADED_ISOCHRONE ? 'precomputed' : 'on-demand';
       results.push({
-        test: `pan:${tgt.name}`, zoom: z, res, cells: times[0].cells, path,
+        test: `pan:${tgt.name}`, zoom: z, res, cells: times[0].cells, path: 'precomputed',
         avgMs: +avgMs.toFixed(1), minMs: +Math.min(...times.map(t=>t.ms)).toFixed(1),
         maxMs: +Math.max(...times.map(t=>t.ms)).toFixed(1),
       });
@@ -2045,48 +1716,428 @@ async function benchLoadBaseline(url) {
   console.log('[BENCH] baseline loaded:', window._benchBaseline.timestamp);
 }
 
+// =============================================================================
+// TEST SUITE — call from console: runTests()
+// validates data existence, rendering, chunk loading, cell integrity
+// =============================================================================
+async function runTests() {
+  if (!LOADED_ISOCHRONE) {
+    console.error('[TEST] isochrone data not loaded — wait for page init');
+    return null;
+  }
+
+  // visual overlay
+  let overlay = document.getElementById('test-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'test-overlay';
+    overlay.style.cssText = `
+      position:fixed; top:10px; left:50%; transform:translateX(-50%);
+      background:rgba(0,0,0,0.9); color:#0ff; font-family:monospace;
+      font-size:13px; padding:12px 20px; border-radius:8px; z-index:9999;
+      border:1px solid #0ff; min-width:400px; text-align:left;
+      max-height:80vh; overflow-y:auto; white-space:pre-wrap;
+    `;
+    document.body.appendChild(overlay);
+  }
+  const lines = [];
+  const show = (msg) => { lines.push(msg); overlay.textContent = lines.join('\n'); };
+
+  const results = { pass: 0, fail: 0, errors: [] };
+  function assert(condition, name) {
+    if (condition) {
+      results.pass++;
+      show('  ✓ ' + name);
+    } else {
+      results.fail++;
+      results.errors.push(name);
+      show('  ✗ FAIL: ' + name);
+    }
+  }
+
+  const origin = ORIGINS[currentOrigin];
+
+  // === 1. DATA LOADING ===
+  show('\n─── 1. Data Loading ───');
+  assert(!!LOADED_ISOCHRONE, 'base isochrone data loaded');
+  assert(!!LOADED_ROUTE_TABLE, 'route table loaded');
+  assert(!!LOADED_AIRPORTS, 'airports data loaded');
+
+  const resKeys = Object.keys(LOADED_ISOCHRONE.resolutions);
+  assert(resKeys.length >= 4, 'has ' + resKeys.length + ' resolutions (need 4+)');
+
+  for (const r of ['1', '2', '3', '4']) {
+    const rd = LOADED_ISOCHRONE.resolutions[r];
+    const count = rd ? Object.keys(rd).length : 0;
+    assert(count > 0, 'res ' + r + ': ' + count + ' cells');
+  }
+
+  const routeCount = Object.keys(LOADED_ROUTE_TABLE).length;
+  assert(routeCount > 3000, 'route table: ' + routeCount + ' airports');
+  const aptCount = Object.keys(LOADED_AIRPORTS).length;
+  assert(aptCount > 4000, 'airports: ' + aptCount);
+
+  // === 2. RESOLUTION MAPPING ===
+  show('\n─── 2. Resolution Mapping ───');
+  const expectedRes = [
+    [0.5, 1], [1.5, 2], [2.5, 4], [3.5, 4], [4.5, 5], [5.5, 5], [7, 6],
+  ];
+  for (const [z, expected] of expectedRes) {
+    const got = getResolutionForZoom(z);
+    assert(got === expected, 'zoom ' + z + ' → res ' + got + ' (expected ' + expected + ')');
+  }
+
+  // === 3. ZOOM SWEEP — render cells at each zoom ===
+  show('\n─── 3. Zoom Sweep (origin center) ───');
+  const zoomSteps = [0.5, 1, 1.5, 2, 3, 4, 4.5];
+  for (const z of zoomSteps) {
+    map.jumpTo({ center: origin.coordinates, zoom: z });
+    await new Promise(r => setTimeout(r, 300));
+
+    const res = getResolutionForZoom(z);
+    const bounds = map.getBounds();
+    const vb = z >= 2 ? {
+      north: bounds.getNorth(), south: bounds.getSouth(),
+      east: bounds.getEast(), west: bounds.getWest()
+    } : null;
+
+    const grid = generateHexGridDirect(origin, res, vb);
+    const cells = grid ? grid.features.length : 0;
+    assert(cells > 0, 'zoom ' + z + ' res ' + res + ': ' + cells + ' cells');
+
+    // check features have valid properties
+    if (grid && grid.features.length > 0) {
+      const f = grid.features[0];
+      assert(f.properties.color && f.properties.color.startsWith('#'),
+        'feature has valid color: ' + f.properties.color);
+      assert(f.properties.travelTimeMinutes > 0,
+        'feature has positive travel time: ' + f.properties.travelTimeMinutes + 'min');
+      assert(f.properties.breakdown, 'feature has breakdown');
+      assert(f.properties.route, 'feature has route');
+    }
+  }
+
+  // === 4. CHUNK LOADING (res 5) ===
+  show('\n─── 4. Chunk Loading (res 5) ───');
+  // clear loaded chunks to force reload
+  loadedChunks[5] = new Set();
+  loadedChunks[6] = new Set();
+  if (LOADED_ISOCHRONE.resolutions['5']) delete LOADED_ISOCHRONE.resolutions['5'];
+  if (LOADED_ISOCHRONE.resolutions['6']) delete LOADED_ISOCHRONE.resolutions['6'];
+
+  map.jumpTo({ center: origin.coordinates, zoom: 5.5 });
+  await new Promise(r => setTimeout(r, 500));
+
+  const bounds5 = map.getBounds();
+  const vb5 = {
+    north: bounds5.getNorth(), south: bounds5.getSouth(),
+    east: bounds5.getEast(), west: bounds5.getWest()
+  };
+  await loadChunksForViewport(5, vb5);
+
+  const r5Data = LOADED_ISOCHRONE.resolutions['5'];
+  const r5Count = r5Data ? Object.keys(r5Data).length : 0;
+  assert(r5Count > 0, 'res 5 chunks loaded: ' + r5Count + ' cells');
+  assert(loadedChunks[5].size > 0, 'chunk tracker: ' + loadedChunks[5].size + ' chunks');
+
+  const grid5 = generateHexGridDirect(origin, 5, vb5);
+  const cells5 = grid5 ? grid5.features.length : 0;
+  assert(cells5 > 0, 'res 5 renders: ' + cells5 + ' cells');
+
+  // === 5. CHUNK LOADING (res 6) ===
+  show('\n─── 5. Chunk Loading (res 6) ───');
+  map.jumpTo({ center: origin.coordinates, zoom: 7 });
+  await new Promise(r => setTimeout(r, 500));
+
+  const bounds6 = map.getBounds();
+  const vb6 = {
+    north: bounds6.getNorth(), south: bounds6.getSouth(),
+    east: bounds6.getEast(), west: bounds6.getWest()
+  };
+  await loadChunksForViewport(6, vb6);
+
+  const r6Data = LOADED_ISOCHRONE.resolutions['6'];
+  const r6Count = r6Data ? Object.keys(r6Data).length : 0;
+  assert(r6Count > 0, 'res 6 chunks loaded: ' + r6Count + ' cells');
+
+  const grid6 = generateHexGridDirect(origin, 6, vb6);
+  const cells6 = grid6 ? grid6.features.length : 0;
+  assert(cells6 > 0, 'res 6 renders: ' + cells6 + ' cells');
+
+  // === 6. PAN TEST — diverse locations ===
+  show('\n─── 6. Pan Test (multiple locations) ───');
+  const panTargets = [
+    { name: 'london',    coords: [-0.12, 51.51],  zoom: 4 },
+    { name: 'paris',     coords: [2.35, 48.86],   zoom: 4 },
+    { name: 'reykjavik', coords: [-21.9, 64.14],  zoom: 4 },
+    { name: 'istanbul',  coords: [28.98, 41.01],  zoom: 4 },
+    { name: 'new-york',  coords: [-74.0, 40.71],  zoom: 4 },
+    { name: 'tokyo',     coords: [139.69, 35.69], zoom: 4 },
+    { name: 'bristol-close', coords: [-2.59, 51.45], zoom: 5.5 }, // chunk loading
+  ];
+  for (const tgt of panTargets) {
+    map.jumpTo({ center: tgt.coords, zoom: tgt.zoom });
+    await new Promise(r => setTimeout(r, 400));
+
+    const res = getResolutionForZoom(tgt.zoom);
+    const b = map.getBounds();
+    const vb = { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() };
+
+    if (res >= 5) await loadChunksForViewport(res, vb);
+
+    const grid = generateHexGridDirect(origin, res, vb);
+    const cells = grid ? grid.features.length : 0;
+    assert(cells > 0, tgt.name + ' z=' + tgt.zoom + ' res ' + res + ': ' + cells + ' cells');
+  }
+
+  // === 7. CELL DATA INTEGRITY ===
+  show('\n─── 7. Cell Data Integrity ───');
+  // sample res-4 cells and validate parseCellData output
+  const res4 = LOADED_ISOCHRONE.resolutions['4'];
+  const sampleKeys = Object.keys(res4).slice(0, 200);
+  let validCells = 0, invalidCells = 0, driveOnlyCells = 0;
+  let routeMatched = 0, routeMissing = 0;
+
+  for (const key of sampleKeys) {
+    const raw = res4[key];
+    try {
+      const parsed = parseCellData(raw);
+      // basic sanity
+      if (parsed.totalMinutes <= 0 || parsed.totalMinutes > 5000) { invalidCells++; continue; }
+      if (!parsed.breakdown) { invalidCells++; continue; }
+      if (!parsed.route) { invalidCells++; continue; }
+
+      if (raw.d) {
+        driveOnlyCells++;
+        // drive-only: total should be reasonable (< 600 min from Bristol)
+        if (parsed.totalMinutes > 600) invalidCells++;
+        else validCells++;
+      } else {
+        validCells++;
+        // flight cell: check route table consistency
+        if (raw.a && LOADED_ROUTE_TABLE[raw.a]) routeMatched++;
+        else if (raw.a) routeMissing++;
+
+        // breakdown should sum approximately to total
+        // connection overhead (~120min/stop) isn't a separate breakdown field
+        const bd = parsed.breakdown;
+        const stops = parsed.route.stops || 0;
+        const connectionEst = stops * 120;
+        const sum = bd.groundTo + bd.overhead + bd.flight + bd.arrival + bd.groundFrom + connectionEst;
+        const diff = Math.abs(sum - parsed.totalMinutes);
+        if (diff > 30) invalidCells++;
+      }
+    } catch (e) {
+      invalidCells++;
+    }
+  }
+
+  assert(validCells > 150, 'valid cells: ' + validCells + '/' + sampleKeys.length);
+  assert(invalidCells < 5, 'invalid cells: ' + invalidCells + ' (< 5 allowed)');
+  assert(routeMatched > 100, 'route table matches: ' + routeMatched);
+  assert(routeMissing === 0, 'missing route entries: ' + routeMissing);
+  show('    (drive-only: ' + driveOnlyCells + ')');
+
+  // === 8. COLOR MAPPING ===
+  show('\n─── 8. Color Mapping ───');
+  const colorTests = [30, 60, 120, 240, 360, 480, 600, 720, 900, 1200, 1500];
+  for (const mins of colorTests) {
+    const color = getTimeBandColor(mins);
+    assert(color && color.startsWith('#') && color.length === 7,
+      mins + 'min → ' + color);
+  }
+  // color scale: changing it should shift colors
+  const origScale = colorScale;
+  colorScale = 2.0;
+  const c1 = getTimeBandColor(300); // 5h at 2× scale
+  colorScale = 0.5;
+  const c2 = getTimeBandColor(300); // 5h at 0.5× scale
+  colorScale = origScale; // restore
+  assert(c1 !== c2, 'color scale shifts bands (2× → ' + c1 + ', 0.5× → ' + c2 + ')');
+
+  // === 9. KNOWN ROUTES ===
+  show('\n─── 9. Known Route Sanity ───');
+  const knownRoutes = [
+    { code: 'CDG', minT: 200, maxT: 500, stops: 0, desc: 'Paris CDG (direct)' },
+    { code: 'JFK', minT: 400, maxT: 900, stops: 0, desc: 'New York JFK' },
+    { code: 'NRT', minT: 600, maxT: 1500, stops: null, desc: 'Tokyo Narita' },
+    { code: 'SYD', minT: 900, maxT: 2500, stops: null, desc: 'Sydney' },
+  ];
+  for (const kr of knownRoutes) {
+    const rt = LOADED_ROUTE_TABLE[kr.code];
+    if (!rt) { assert(false, kr.desc + ': not in route table'); continue; }
+    assert(rt.t >= kr.minT && rt.t <= kr.maxT,
+      kr.desc + ': ' + rt.t + 'min (expected ' + kr.minT + '-' + kr.maxT + ')');
+    if (kr.stops !== null) {
+      assert(rt.s === kr.stops, kr.desc + ': ' + rt.s + ' stops (expected ' + kr.stops + ')');
+    }
+    assert(rt.p.length >= 2, kr.desc + ': path has ' + rt.p.length + ' airports');
+    assert(rt.l.length === rt.p.length - 1, kr.desc + ': legs match path length');
+  }
+
+  // === 10. DRIVE-ONLY ZONE ===
+  show('\n─── 10. Drive-Only Zone ───');
+  // cells near Bristol should be drive-only at res 4
+  let driveCount = 0, flightNearOrigin = 0;
+  for (const key of Object.keys(res4)) {
+    const cell = res4[key];
+    if (!cell.d) continue;
+    driveCount++;
+    // verify drive times are reasonable (< 10h from Bristol)
+    if (cell.t > 600) {
+      assert(false, 'drive-only cell with t=' + cell.t + 'min (too high)');
+      break;
+    }
+  }
+  assert(driveCount > 0, 'drive-only zone exists: ' + driveCount + ' cells at res 4');
+  assert(driveCount < 500, 'drive-only zone not too large: ' + driveCount + ' cells');
+
+  // === SUMMARY ===
+  show('\n' + '═'.repeat(50));
+  if (results.fail === 0) {
+    show('ALL ' + results.pass + ' TESTS PASSED');
+  } else {
+    show(results.pass + ' passed, ' + results.fail + ' FAILED');
+    show('failures:');
+    for (const e of results.errors) show('  → ' + e);
+  }
+  show('═'.repeat(50));
+
+  // restore map to sensible view
+  map.jumpTo({ center: origin.coordinates, zoom: 4 });
+
+  // auto-dismiss after 15s
+  setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 15000);
+
+  window._lastTests = results;
+  console.log('[TEST] results:', results);
+  return results;
+}
+
 function showTooltip(properties) {
   const tooltip = document.getElementById('tooltip');
   const breakdown = JSON.parse(properties.breakdown);
   const route = JSON.parse(properties.route);
 
-  // Find airport names
-  const destAirport = AIRPORTS.find(a => a.code === route.destAirport);
-  const locationName = destAirport ? `Near ${destAirport.name}` : 'Location';
+  // find airport name for location display (prefer full dataset, fall back to hardcoded)
+  const destAptData = LOADED_AIRPORTS?.[route.destAirport];
+  const locationName = destAptData ? `Near ${destAptData.name}` : 'Location';
 
   document.getElementById('tooltip-location').textContent = locationName;
   document.getElementById('tooltip-time').textContent = formatTime(properties.travelTimeMinutes);
   document.getElementById('tooltip-time').style.color = properties.color;
 
-  // route display: handle drive-only, direct flights, and multi-stop
-  const routeEl = document.getElementById('tooltip-route');
+  // build dynamic breakdown rows
+  const container = document.getElementById('tooltip-breakdown');
+  let html = '';
+
   if (route.stops === -1 || route.originAirport === 'drive') {
-    routeEl.innerHTML = '<span>Drive only</span>';
-  } else if (route.path && Array.isArray(route.path) && route.path.length > 1) {
-    // multi-stop: show full path e.g. "Bristol → BRS ✈ LHR ✈ JFK"
-    const originName = ORIGINS[currentOrigin].name.split(',')[0];
-    const pathStr = route.path.join(' ✈ ');
-    routeEl.innerHTML = `<span>${originName} → ${pathStr}</span>`;
-  } else if (route.isDirect) {
-    const originName = ORIGINS[currentOrigin].name.split(',')[0];
-    routeEl.innerHTML =
-      `<span>${originName} → ${route.originAirport} ✈ ${route.destAirport}</span>`;
+    // drive-only
+    html += `<div class="breakdown-row route"><span>Drive only</span></div>`;
+    html += row('Drive time', breakdown.groundTo);
   } else {
+    // route line: Bristol → BRS ✈ AMS ✈ NRT → destination
     const originName = ORIGINS[currentOrigin].name.split(',')[0];
-    routeEl.innerHTML =
-      `<span>${originName} → ${route.originAirport} ✈ ${route.destAirport}</span>`;
+    const path = route.path;
+    let routeStr;
+    if (path && path.length > 0) {
+      routeStr = `${originName} → ${path.join(' ✈ ')} → dest`;
+    } else {
+      routeStr = `${originName} → ${route.originAirport} ✈ ${route.destAirport}`;
+    }
+    html += `<div class="breakdown-row route"><span>${routeStr}</span></div>`;
+
+    // ground to first airport
+    const firstAirport = (path && path.length > 0) ? path[0] : route.originAirport;
+    html += row(`Ground to ${firstAirport}`, breakdown.groundTo);
+    html += row('Airport overhead', breakdown.overhead);
+
+    // per-leg flight times (from route table) or lumped total
+    const legs = breakdown.legs || [];
+    if (legs.length > 0 && path && path.length > 1) {
+      for (let i = 0; i < legs.length; i++) {
+        const from = path[i];
+        const to = path[i + 1];
+        html += row(`${from} → ${to}`, legs[i]);
+        // connection row between legs (not after last leg)
+        if (i < legs.length - 1) {
+          html += row(`Connection at ${to}`, 120); // 90 + 30
+        }
+      }
+    } else {
+      // no per-leg data, show total flight time
+      html += row('Flight time', breakdown.flight);
+    }
+
+    // arrival + ground from airport
+    html += row('Arrival + ground', breakdown.arrival + (breakdown.groundFrom || 0));
   }
 
-  document.getElementById('tooltip-ground-to').textContent = formatTime(breakdown.groundTo);
-  document.getElementById('tooltip-overhead').textContent = formatTime(breakdown.overhead);
-  document.getElementById('tooltip-flight').textContent = formatTime(breakdown.flight);
-  document.getElementById('tooltip-ground-from').textContent = formatTime(breakdown.arrival + breakdown.groundFrom);
+  // debug: cell coords + OSRM status
+  const centroid = JSON.parse(properties.centroid);
+  const osrmFlag = properties.osrm ? 'OSRM' : 'haversine';
+  html += `<div class="breakdown-row" style="opacity:0.5;font-size:11px;margin-top:4px">`;
+  html += `<span>${centroid[1].toFixed(3)}, ${centroid[0].toFixed(3)}</span>`;
+  html += `<span>ground: ${osrmFlag}</span>`;
+  html += `</div>`;
 
+  container.innerHTML = html;
   tooltip.classList.add('visible');
+
+  // helper: one breakdown row
+  function row(label, minutes) {
+    return `<div class="breakdown-row"><span class="label">${label}</span><span class="value">${formatTime(minutes)}</span></div>`;
+  }
 }
 
 function hideTooltip() {
   document.getElementById('tooltip').classList.remove('visible');
+}
+
+// build geojson for route line visualization on hover
+// returns FeatureCollection with flight legs (solid) + ground segment (dashed)
+function buildRouteGeoJSON(route, centroid) {
+  const features = [];
+  if (!route.path || route.path.length < 2) return { type: 'FeatureCollection', features };
+
+  // flight legs: airport → airport along the path
+  const flightCoords = [];
+  for (const code of route.path) {
+    const apt = LOADED_AIRPORTS?.[code];
+    if (apt) flightCoords.push([apt.lng, apt.lat]);
+  }
+
+  if (flightCoords.length >= 2) {
+    // handle antimeridian: if any pair of consecutive points spans >180° lng,
+    // shift negative lngs to keep the line contiguous
+    const needsShift = flightCoords.some((c, i) =>
+      i > 0 && Math.abs(c[0] - flightCoords[i-1][0]) > 180
+    );
+    const adjusted = needsShift
+      ? flightCoords.map(([lng, lat]) => [lng < 0 ? lng + 360 : lng, lat])
+      : flightCoords;
+
+    features.push({
+      type: 'Feature',
+      properties: { segment: 'flight' },
+      geometry: { type: 'LineString', coordinates: adjusted }
+    });
+
+    // ground segment: last airport → cell centroid (lighter dashed line)
+    if (centroid) {
+      const lastApt = adjusted[adjusted.length - 1];
+      let destLng = centroid[0];
+      // match antimeridian shift if applied
+      if (needsShift && destLng < 0) destLng += 360;
+      features.push({
+        type: 'Feature',
+        properties: { segment: 'ground' },
+        geometry: { type: 'LineString', coordinates: [lastApt, [destLng, centroid[1]]] }
+      });
+    }
+  }
+
+  return { type: 'FeatureCollection', features };
 }
 
 // =============================================================================
@@ -2103,6 +2154,15 @@ document.getElementById('toggle-grid').addEventListener('change', (e) => {
   const visibility = e.target.checked ? 'visible' : 'none';
   map.setLayoutProperty('hexgrid-fill', 'visibility', visibility);
   map.setLayoutProperty('hexgrid-line', 'visibility', visibility);
+});
+
+// color scale slider: recolor grid + update legend on change
+document.getElementById('color-scale').addEventListener('input', (e) => {
+  colorScale = parseFloat(e.target.value);
+  document.getElementById('color-scale-label').textContent =
+    colorScale.toFixed(1) + '×';
+  recolorGrid();
+  updateLegend();
 });
 
 // Initialize

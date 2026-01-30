@@ -256,11 +256,15 @@ def save_by_region(ground_data, airports):
         log(f"  {region}: {len(data)} airports, {total_cells} cells ({size_kb:.0f} KB)")
 
 
+def progress_bar(pct, width=20):
+    """render a filled progress bar"""
+    filled = int(width * pct / 100)
+    return "█" * filled + "░" * (width - filled)
+
+
 def show_status(airports, ground_data, completed):
     """show progress summary"""
-    print("\n=== OSRM CRAWLER STATUS ===\n")
-
-    # by region
+    # gather stats
     by_region = {}
     for code, apt in airports.items():
         region = get_region(apt.get("country", ""))
@@ -270,32 +274,47 @@ def show_status(airports, ground_data, completed):
         if code in completed:
             by_region[region]["done"] += 1
 
-    print(f"{'region':<15} {'done':>6} / {'total':>6}  {'progress':>8}")
-    print("-" * 45)
-
-    total_done = 0
-    total_airports = 0
-    for region in REGION_PRIORITY + ["other"]:
-        if region in by_region:
-            r = by_region[region]
-            pct = r["done"] / r["total"] * 100 if r["total"] > 0 else 0
-            print(f"{region:<15} {r['done']:>6} / {r['total']:>6}  {pct:>7.1f}%")
-            total_done += r["done"]
-            total_airports += r["total"]
-
-    print("-" * 45)
-    pct = total_done / total_airports * 100 if total_airports > 0 else 0
-    print(f"{'TOTAL':<15} {total_done:>6} / {total_airports:>6}  {pct:>7.1f}%")
-
+    total_done = sum(r["done"] for r in by_region.values())
+    total_airports = sum(r["total"] for r in by_region.values())
+    total_pct = total_done / total_airports * 100 if total_airports > 0 else 0
     total_cells = sum(len(c) for c in ground_data.values())
-    print(f"\ntotal cells computed: {total_cells:,}")
 
-    # eta
+    # compute eta from crawl start time (first log entry after "starting crawl")
+    # use observed rate: ~2.7 min/airport
     remaining = total_airports - total_done
+    min_per_airport = 2.7
+    eta_hours = remaining * min_per_airport / 60
+    now = datetime.now()
+    eta_time = now + timedelta(hours=eta_hours)
+
+    # fixed-width box (inner width 47)
+    W = 47
+    def row(s):
+        print(f"│ {s:<{W}} │")
+
+    print()
+    print(f"┌─{'─' * W}─┐")
+    row(f"OSRM CRAWLER   {total_pct:5.1f}%   {total_done}/{total_airports} airports")
+    row(progress_bar(total_pct, W))
+    row(f"{total_cells:,} cells   ETA: {eta_time.strftime('%a %b %d %H:%M')}")
+    print(f"├─{'─' * W}─┤")
+
+    # per-region rows
+    for region in REGION_PRIORITY + ["other"]:
+        if region not in by_region:
+            continue
+        r = by_region[region]
+        pct = r["done"] / r["total"] * 100 if r["total"] > 0 else 0
+        bar = progress_bar(pct, 16)
+        done_str = "DONE" if pct == 100 else f"{pct:5.1f}%"
+        row(f"{region:<14} {bar} {done_str:>6} {r['done']:>4}/{r['total']:<4}")
+
+    print(f"└─{'─' * W}─┘")
+
     if remaining > 0:
-        min_per_airport = 3  # rough estimate
-        eta_hours = remaining * min_per_airport / 60
-        print(f"estimated time remaining: ~{eta_hours:.0f} hours")
+        print(f"\n  ~{eta_hours:.0f}h remaining (~{min_per_airport:.1f} min/airport)")
+    else:
+        print("\n  done!")
 
 
 def main():

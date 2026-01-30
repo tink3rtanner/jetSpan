@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head><title>Benchmark Runner</title></head>
+<body>
+<pre id="output">Loading isochrone page in iframe to run benchmark...</pre>
+<iframe id="iso-frame" src="/isochrone.html" style="width:1920px;height:1080px;border:none;"></iframe>
+<script>
+const output = document.getElementById('output');
+function log(msg) { output.textContent += '\n' + msg; }
+
+const iframe = document.getElementById('iso-frame');
+iframe.onload = async function() {
+    log('iframe loaded, waiting for data...');
+
+    const win = iframe.contentWindow;
+
+    // wait for data to load
+    let attempts = 0;
+    while (!win.LOADED_ISOCHRONE && attempts < 60) {
+        await new Promise(r => setTimeout(r, 1000));
+        attempts++;
+    }
+
+    if (!win.LOADED_ISOCHRONE) {
+        log('FAIL: isochrone data did not load after 60s');
+        log('BENCHMARK_COMPLETE');
+        return;
+    }
+
+    log('data loaded, checking for JS errors...');
+
+    // check globals exist
+    const checks = [
+        ['LOADED_ISOCHRONE', !!win.LOADED_ISOCHRONE],
+        ['LOADED_ROUTE_TABLE', !!win.LOADED_ROUTE_TABLE],
+        ['LOADED_AIRPORTS', !!win.LOADED_AIRPORTS],
+        ['map', !!win.map],
+        ['parseCellData', typeof win.parseCellData === 'function'],
+        ['showTooltip', typeof win.showTooltip === 'function'],
+        ['generateHexGridDirect', typeof win.generateHexGridDirect === 'function'],
+        ['loadChunksForViewport', typeof win.loadChunksForViewport === 'function'],
+        ['formatTime', typeof win.formatTime === 'function'],
+    ];
+
+    let allOk = true;
+    for (const [name, ok] of checks) {
+        log((ok ? '  OK' : '  MISSING') + ': ' + name);
+        if (!ok) allOk = false;
+    }
+
+    if (!allOk) {
+        log('\nFAIL: some globals missing');
+        log('BENCHMARK_COMPLETE');
+        return;
+    }
+
+    // verify stripped functions are gone
+    const stripped = [
+        'calculateTotalTravelTime',
+        'buildAirportSpatialIndex',
+        'findNearestAirports',
+        'estimateFlightMinutes',
+        'getOSRMGroundTime',
+        'loadGroundData',
+    ];
+    for (const fn of stripped) {
+        const exists = typeof win[fn] === 'function';
+        log((exists ? '  WARN: still exists' : '  STRIPPED') + ': ' + fn);
+    }
+
+    // test parseCellData with route table
+    log('\n--- parseCellData test ---');
+    const testCells = [
+        {t: 329, o: 'BRS', a: 'CDG', s: 0},  // direct to Paris
+        {t: 907, o: 'LHR', a: 'NRT', s: 0},   // direct to Tokyo
+        {t: 675, o: 'LHR', a: 'LYR', s: 1},   // 1-stop to Svalbard
+        {t: 25, d: 1},                           // drive-only
+    ];
+
+    for (const cell of testCells) {
+        try {
+            const result = win.parseCellData(cell);
+            if (cell.d) {
+                log('  drive-only: total=' + result.totalMinutes + 'min');
+            } else {
+                const rt = result.route;
+                const bd = result.breakdown;
+                log('  ' + cell.a + ': total=' + result.totalMinutes + 'min, path=' +
+                    (rt.path || []).join('>') + ', legs=' + JSON.stringify(bd.legs) +
+                    ', groundFrom=' + bd.groundFrom + 'min');
+            }
+        } catch (e) {
+            log('  ERROR parsing cell ' + JSON.stringify(cell) + ': ' + e.message);
+        }
+    }
+
+    // test generateHexGridDirect at various resolutions
+    log('\n--- render test ---');
+    const origin = win.ORIGINS[win.currentOrigin];
+    for (const res of [1, 2, 3, 4]) {
+        try {
+            const t0 = performance.now();
+            const grid = win.generateHexGridDirect(origin, res, null);
+            const elapsed = performance.now() - t0;
+            const cells = grid ? grid.features.length : 0;
+            log('  res ' + res + ': ' + cells + ' cells, ' + elapsed.toFixed(1) + 'ms');
+        } catch (e) {
+            log('  res ' + res + ' ERROR: ' + e.message);
+        }
+    }
+
+    // now run the built-in benchmark if available
+    log('\n--- built-in benchmark ---');
+    if (typeof win.runBenchmark === 'function') {
+        try {
+            log('running benchmark (this takes ~30s)...');
+            const benchResults = await win.runBenchmark();
+            if (benchResults) {
+                log('\nbenchmark results:');
+                log(JSON.stringify(benchResults, null, 2));
+            } else {
+                log('benchmark returned null');
+            }
+        } catch (e) {
+            log('benchmark error: ' + e.message);
+        }
+    } else {
+        log('runBenchmark not available');
+    }
+
+    log('\nBENCHMARK_COMPLETE');
+};
+</script>
+</body>
+</html>

@@ -425,3 +425,136 @@ With water/remote filtering: res 5 likely ~500k cells, ~35 MB.
 2. gzip — GitHub Pages serves gzip; ~60-70% compression on JSON → ~10-15 MB
 3. Binary packing — `{t,o,a,s}` as fixed-width fields instead of JSON keys
 4. Selective res 5 — only precompute within ~2000km of origin (covers useful zoom range)
+
+---
+
+## 2026-01-29 — Full Precompute (Res 1-6)
+
+### Architecture Change: On-Demand Eliminated
+
+All resolutions now precomputed. Client is a pure renderer — zero on-demand routing.
+
+```
+BEFORE (hybrid):
+  res 1-4: precomputed JSON, direct render (<100ms)
+  res 5-6: grid iteration + on-demand compute (250-2400ms)
+
+AFTER (full precompute):
+  res 1-4: precomputed base JSON, direct render (<100ms)
+  res 5-6: lazy-loaded chunks per viewport, direct render (<30ms)
+  route table: per-airport routing info for exact tooltip breakdown
+```
+
+**Code stripped**: `calculateTotalTravelTime`, `buildAirportSpatialIndex`,
+`findNearestAirports`, `estimateFlightMinutes`, `getOSRMGroundTime`,
+`loadGroundData`, `COUNTRY_TO_REGION`, `LOADED_GROUND`, `FLIGHT_TIMES`,
+travel time cache, spatial index. ~400 lines removed.
+
+### Precompute Output
+
+| Resolution | Cells | Time | Output |
+|------------|-------|------|--------|
+| 1 | 355 | 0.1s | base JSON |
+| 2 | 2,500 | 0.5s | base JSON |
+| 3 | 17,515 | 2.6s | base JSON |
+| 4 | 122,707 | 7.2s | base JSON |
+| 5 | 858,921 | 82.2s | 527 chunk files |
+| 6 | 6,012,353 | 469.1s | 3,042 chunk files |
+
+**Total**: 7,014,351 cells in 551.5s (dijkstra: 0.4s, cell iteration: 551.1s)
+
+### File Size
+
+| Component | Size | Notes |
+|-----------|------|-------|
+| Base JSON (res 1-4) | 8.7 MB | loaded on init |
+| Route table | 224 KB | 3,139 airports, per-leg times |
+| Res 5 chunks | 52.3 MB | 527 files, grouped by res-1 parent |
+| Res 6 chunks | 418.1 MB | 3,042 files, grouped by res-2 parent |
+| **Total** | **479 MB** | gzip ~91% → ~43 MB |
+
+### Chunk Loading Performance
+
+Chunks are lazy-loaded by viewport on zoom/pan:
+
+| Event | Chunks | Cells | Fetch time | Render time |
+|-------|--------|-------|------------|-------------|
+| Zoom to res 5 (Bristol) | 2 | 4,263 | 8ms | 10ms |
+| Zoom to res 6 (Bristol) | 2 | 4,802 | 6ms | 8ms |
+
+### Benchmark Results (all precomputed)
+
+**Hardware**: MacBook (darwin 25.2.0), Chrome
+**Origin**: Bristol
+**Data**: 7M cells across res 1-6, route table with 3,139 airports
+
+#### Zoom Sweep
+
+| Zoom | Res | Cells | Avg (ms) | Min (ms) | Max (ms) | vs Old On-Demand |
+|------|-----|-------|----------|----------|----------|------------------|
+| 0.5 | 1 | 355 | 1.9 | 1.8 | 1.9 | — |
+| 1.0 | 2 | 2,500 | 6.2 | 5.5 | 7.1 | — |
+| 1.5 | 2 | 2,500 | 6.0 | 5.8 | 6.4 | — |
+| 2.0 | 3 | 17,515 | 37.1 | 36.3 | 37.6 | — |
+| 2.5 | 3 | 17,515 | 38.2 | 37.4 | 38.9 | — |
+| 3.0 | 4 | 72,312 | 194.4 | 184.1 | 212.1 | — |
+| 3.5 | 4 | 28,141 | 108.1 | 101.5 | 121.0 | — |
+| 4.0 | 4 | 9,759 | 72.9 | 71.6 | 73.9 | — |
+| 4.5 | 4 | 4,044 | 61.7 | 61.5 | 61.8 | — |
+| **5.0** | **5** | **8,046** | **20.6** | **19.1** | **22.0** | **was 2,444ms → 119x** |
+| **5.5** | **5** | **5,668** | **17.4** | **16.7** | **17.9** | **was 354ms → 20x** |
+| **6.0** | **5** | **3,877** | **15.8** | **14.5** | **17.0** | **was 105ms → 7x** |
+| **6.5** | **6** | **11,541** | **28.4** | **27.9** | **29.3** | **was 544ms → 19x** |
+| **7.0** | **6** | **6,325** | **18.5** | **17.8** | **19.8** | **was 257ms → 14x** |
+
+#### Pan Tests (3-run avg, ms)
+
+| Location | z=4 res 4 | z=5.5 res 5 | z=7 res 6 |
+|----------|-----------|-------------|-----------|
+| London | 72.2 | 21.5 | 17.7 |
+| Paris | 74.0 | 23.4 | 20.4 |
+| Reykjavik | 62.6 | 16.1 | 17.2 |
+| Istanbul | 85.7 | 20.2 | 22.6 |
+
+#### Comparison: On-Demand vs Full Precompute (pan @ z=5.5)
+
+| Location | On-demand (old) | Precomputed (new) | Speedup |
+|----------|----------------|-------------------|---------|
+| London | 255ms | 21.5ms | **12x** |
+| Paris | 245ms | 23.4ms | **10x** |
+| Reykjavik | 326ms | 16.1ms | **20x** |
+| Istanbul | 363ms | 20.2ms | **18x** |
+
+### The Cliff Is Gone
+
+```
+BEFORE (precomputed cliff at z5.0):
+  z: 0.5  1  1.5  2  2.5  3   3.5  4   4.5 │ 5     5.5   6    6.5   7
+ ms:   2  6   6  39  43  204  113  76   63  │ 2444  354   105  544   257
+                                              │
+                                       39x cliff ─┘
+
+AFTER (all precomputed):
+  z: 0.5  1  1.5  2  2.5  3   3.5  4   4.5   5    5.5  6   6.5  7
+ ms:   2  6   6  37  38  194  108  73   62   21   17   16   28  19
+                                              │
+                                    no cliff ─┘  (62→21ms, smooth)
+```
+
+### Route Table & Tooltip
+
+New route table (`data/isochrones/bristol/routes.json`, 224 KB) provides:
+- Full airport path per destination: `["LHR", "OSL", "LYR"]`
+- Per-leg flight times: `[157, 198]` minutes
+- Total dijkstra time + stop count
+
+Tooltip now shows exact per-leg breakdown:
+```
+Bristol → LHR ✈ PEK ✈ NDG → dest
+Ground to LHR          2h 00m
+Airport overhead       1h 30m
+LHR → PEK            10h 06m
+Connection at PEK      2h 00m
+PEK → NDG             2h 13m
+Arrival + ground       6h 31m
+```

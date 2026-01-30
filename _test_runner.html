@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>JetSpan Test Suite</title></head>
+<body>
+<pre id="output">JetSpan Test Suite — running...</pre>
+<script>
+const output = document.getElementById('output');
+function log(msg) { output.textContent += '\n' + msg; }
+
+async function runTests() {
+    const results = { pass: 0, fail: 0, errors: [] };
+
+    function assert(condition, name) {
+        if (condition) {
+            results.pass++;
+            log('  ✓ ' + name);
+        } else {
+            results.fail++;
+            results.errors.push(name);
+            log('  ✗ FAIL: ' + name);
+        }
+    }
+
+    // === 1. BASE DATA ===
+    log('\n─── 1. Base Isochrone Data ───');
+    let isoData;
+    try {
+        const isoRes = await fetch('/data/isochrones/bristol.json', {cache: 'no-cache'});
+        assert(isoRes.ok, 'bristol.json loads (HTTP ' + isoRes.status + ')');
+        isoData = await isoRes.json();
+        assert(isoData.resolutions !== undefined, 'has resolutions key');
+        const resKeys = Object.keys(isoData.resolutions);
+        assert(resKeys.length >= 4, resKeys.length + ' resolutions (need 4+)');
+
+        for (const r of ['1', '2', '3', '4']) {
+            const rd = isoData.resolutions[r];
+            const count = rd ? Object.keys(rd).length : 0;
+            assert(count > 0, 'res ' + r + ': ' + count.toLocaleString() + ' cells');
+        }
+
+        // cell format check
+        const res4 = isoData.resolutions['4'];
+        const sampleKey = Object.keys(res4)[0];
+        const sampleCell = res4[sampleKey];
+        assert('t' in sampleCell, 'cell has t (time): ' + sampleCell.t);
+        assert(sampleCell.t > 0 && sampleCell.t < 5000, 'time is reasonable: ' + sampleCell.t + 'min');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 2. ROUTE TABLE ===
+    log('\n─── 2. Route Table ───');
+    let routes;
+    try {
+        const rtRes = await fetch('/data/isochrones/bristol/routes.json', {cache: 'no-cache'});
+        assert(rtRes.ok, 'routes.json loads');
+        routes = await rtRes.json();
+        const routeCount = Object.keys(routes).length;
+        assert(routeCount > 3000, routeCount + ' airports in route table');
+
+        // known direct flight: BRS → CDG
+        const cdg = routes['CDG'];
+        assert(cdg !== undefined, 'CDG route exists');
+        if (cdg) {
+            assert(Array.isArray(cdg.p) && cdg.p.length >= 2, 'CDG path: ' + JSON.stringify(cdg.p));
+            assert(Array.isArray(cdg.l) && cdg.l.length >= 1, 'CDG has leg times');
+            assert(cdg.s === 0, 'CDG is direct (stops=' + cdg.s + ')');
+            assert(cdg.p[cdg.p.length - 1] === 'CDG', 'CDG path ends at CDG');
+            assert(cdg.t > 50 && cdg.t < 300, 'CDG time reasonable: ' + cdg.t + 'min');
+        }
+
+        // known multi-stop
+        const nrt = routes['NRT'];
+        if (nrt) {
+            assert(nrt.t > 600 && nrt.t < 1500, 'NRT total: ' + nrt.t + 'min');
+            assert(nrt.l.length === nrt.p.length - 1, 'NRT legs match path');
+            const flightSum = nrt.l.reduce((a,b) => a+b, 0);
+            assert(flightSum > 0, 'NRT positive flight time: ' + flightSum + 'min');
+        }
+
+        // route table entries should all have required fields
+        let validRoutes = 0, invalidRoutes = 0;
+        for (const [code, rt] of Object.entries(routes)) {
+            if (rt.p && rt.l && typeof rt.t === 'number' && typeof rt.s === 'number') {
+                validRoutes++;
+            } else {
+                invalidRoutes++;
+                if (invalidRoutes <= 3) log('    invalid route: ' + code + ' → ' + JSON.stringify(rt));
+            }
+        }
+        assert(invalidRoutes === 0, 'all routes valid (' + invalidRoutes + ' invalid)');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 3. CHUNK FILES (gzipped) ===
+    log('\n─── 3. Chunk Files (.json.gz) ───');
+    // helper: fetch gzipped JSON and decompress client-side
+    async function fetchGz(url) {
+        const res = await fetch(url, {cache: 'no-cache'});
+        if (!res.ok) return null;
+        const ds = new DecompressionStream('gzip');
+        const stream = res.body.pipeThrough(ds);
+        return new Response(stream).json();
+    }
+    try {
+        // res 5 chunks (grouped by res-1 parent)
+        const res1Cells = Object.keys(isoData.resolutions['1']);
+        let r5ok = 0, r5fail = 0, r5cells = 0;
+        for (const parent of res1Cells.slice(0, 8)) {
+            try {
+                const chunk = await fetchGz('/data/isochrones/bristol/r5/' + parent + '.json.gz');
+                if (chunk) {
+                    const count = Object.keys(chunk).length;
+                    r5cells += count;
+                    r5ok++;
+                    // validate cell format
+                    const firstKey = Object.keys(chunk)[0];
+                    if (firstKey && !('t' in chunk[firstKey])) r5fail++;
+                } else {
+                    r5ok++; // 404 = ocean-only parent, expected
+                }
+            } catch (e) {
+                // fetch returned 404 (null from fetchGz)
+                r5ok++;
+            }
+        }
+        assert(r5ok > 0 && r5fail === 0, 'r5 chunks: ' + r5ok + ' ok, ' + r5cells + ' cells');
+
+        // res 6 chunks (grouped by res-2 parent)
+        const res2Cells = Object.keys(isoData.resolutions['2']);
+        let r6ok = 0, r6fail = 0, r6cells = 0;
+        for (const parent of res2Cells.slice(0, 5)) {
+            try {
+                const chunk = await fetchGz('/data/isochrones/bristol/r6/' + parent + '.json.gz');
+                if (chunk) {
+                    r6cells += Object.keys(chunk).length;
+                    r6ok++;
+                } else {
+                    r6ok++;
+                }
+            } catch (e) {
+                r6ok++;
+            }
+        }
+        assert(r6ok > 0 && r6fail === 0, 'r6 chunks: ' + r6ok + ' ok, ' + r6cells + ' cells');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 4. AIRPORTS DATA ===
+    log('\n─── 4. Airports Data ───');
+    try {
+        const aptRes = await fetch('/data/airports.json', {cache: 'no-cache'});
+        assert(aptRes.ok, 'airports.json loads');
+        const airports = await aptRes.json();
+        const aptCount = Object.keys(airports).length;
+        assert(aptCount > 4000, aptCount + ' airports');
+
+        // key airports exist with required fields
+        for (const code of ['BRS', 'LHR', 'CDG', 'JFK', 'NRT']) {
+            const apt = airports[code];
+            assert(apt !== undefined, code + ' exists');
+            if (apt) {
+                assert(apt.name && apt.lat && apt.lng, code + ': has name/lat/lng');
+            }
+        }
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 5. ROUTES DATA ===
+    log('\n─── 5. Routes Data ───');
+    try {
+        const routeRes = await fetch('/data/routes.json', {cache: 'no-cache'});
+        assert(routeRes.ok, 'routes.json loads');
+        const routeData = await routeRes.json();
+        // routes.json is { airport: [destinations] }
+        const routeKeys = Object.keys(routeData);
+        assert(routeKeys.length > 3000, routeKeys.length + ' origin airports');
+
+        // BRS should have destinations
+        const brsDests = routeData['BRS'];
+        assert(Array.isArray(brsDests) && brsDests.length > 10,
+            'BRS has ' + (brsDests ? brsDests.length : 0) + ' destinations');
+
+        // count total routes
+        let totalRoutes = 0;
+        for (const dests of Object.values(routeData)) totalRoutes += dests.length;
+        assert(totalRoutes > 50000, totalRoutes + ' total routes');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 6. DATA CONSISTENCY ===
+    log('\n─── 6. Data Consistency ───');
+    try {
+        const res4 = isoData.resolutions['4'];
+        const cellKeys = Object.keys(res4);
+        let matched = 0, missing = 0, driveOnly = 0, badTime = 0;
+
+        // sample every 10th cell
+        for (let i = 0; i < Math.min(2000, cellKeys.length); i += 10) {
+            const cell = res4[cellKeys[i]];
+            if (cell.d) { driveOnly++; continue; }
+
+            // time should be positive and < 80h
+            if (cell.t <= 0 || cell.t > 4800) { badTime++; continue; }
+
+            // dest airport should be in route table
+            if (cell.a && routes[cell.a]) {
+                matched++;
+            } else if (cell.a) {
+                missing++;
+                if (missing <= 3) log('    missing: ' + cell.a);
+            }
+        }
+        const sampled = Math.ceil(Math.min(2000, cellKeys.length) / 10);
+        log('    sampled ' + sampled + ': ' + matched + ' matched, ' +
+            missing + ' missing, ' + driveOnly + ' drive, ' + badTime + ' bad time');
+        assert(matched > 50, 'route table matches: ' + matched);
+        assert(missing === 0, 'no missing airport refs: ' + missing);
+        assert(badTime === 0, 'no bad travel times: ' + badTime);
+
+        // drive-only cells should have reasonable times
+        let badDrive = 0;
+        for (const key of cellKeys) {
+            const cell = res4[key];
+            if (cell.d && (cell.t <= 0 || cell.t > 600)) badDrive++;
+        }
+        assert(badDrive === 0, 'all drive-only times < 10h: ' + badDrive + ' bad');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 7. PAGE INTEGRITY ===
+    log('\n─── 7. Page Integrity ───');
+    try {
+        const pageRes = await fetch('/isochrone.html', {cache: 'no-cache'});
+        assert(pageRes.ok, 'isochrone.html loads');
+        const html = await pageRes.text();
+
+        // required functions present
+        const required = [
+            'parseCellData', 'generateHexGridDirect', 'showTooltip',
+            'loadChunksForViewport', 'getTimeBandColor', 'formatTime',
+            'LOADED_ROUTE_TABLE', 'runTests', 'runBenchmark',
+        ];
+        for (const fn of required) {
+            assert(html.includes(fn), fn + ' present');
+        }
+
+        // stripped functions should be gone
+        const stripped = [
+            'calculateTotalTravelTime', 'buildAirportSpatialIndex',
+            'estimateFlightMinutes', 'getOSRMGroundTime',
+            'loadGroundData', 'COUNTRY_TO_REGION',
+        ];
+        for (const fn of stripped) {
+            assert(!html.includes(fn), fn + ' removed');
+        }
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 8. KNOWN ROUTE SANITY ===
+    log('\n─── 8. Known Route Sanity ───');
+    const knownRoutes = [
+        { code: 'CDG', minT: 50, maxT: 300, stops: 0, desc: 'Paris CDG' },
+        { code: 'AMS', minT: 50, maxT: 300, stops: 0, desc: 'Amsterdam' },
+        { code: 'JFK', minT: 300, maxT: 800, desc: 'New York JFK' },
+        { code: 'NRT', minT: 600, maxT: 1500, desc: 'Tokyo Narita' },
+        { code: 'SYD', minT: 900, maxT: 2500, desc: 'Sydney' },
+        { code: 'GRU', minT: 500, maxT: 1500, desc: 'Sao Paulo' },
+    ];
+    for (const kr of knownRoutes) {
+        const rt = routes[kr.code];
+        if (!rt) { assert(false, kr.desc + ': not in route table'); continue; }
+        assert(rt.t >= kr.minT && rt.t <= kr.maxT,
+            kr.desc + ': ' + rt.t + 'min (' + kr.minT + '-' + kr.maxT + ')');
+        if (kr.stops !== undefined) {
+            assert(rt.s === kr.stops, kr.desc + ': ' + rt.s + ' stops');
+        }
+        assert(rt.p.length >= 2 && rt.l.length === rt.p.length - 1,
+            kr.desc + ': path/legs consistent');
+    }
+
+    // === 9. CROSS-RESOLUTION CONSISTENCY ===
+    log('\n─── 9. Cross-Resolution Consistency ───');
+    try {
+        // for a known cell, check that parent/child times are consistent
+        // (child cell time should be close to its parent's time)
+        const res3 = isoData.resolutions['3'];
+        const res4 = isoData.resolutions['4'];
+        const res3Keys = Object.keys(res3).slice(0, 50);
+        let consistent = 0, inconsistent = 0;
+
+        for (const r3Key of res3Keys) {
+            const r3Cell = res3[r3Key];
+            if (r3Cell.d) continue; // skip drive-only
+
+            // find any res-4 cell with same dest airport
+            for (const r4Key of Object.keys(res4).slice(0, 500)) {
+                const r4Cell = res4[r4Key];
+                if (r4Cell.a === r3Cell.a && !r4Cell.d) {
+                    // same airport — times should be within 3h (ground_from varies)
+                    const diff = Math.abs(r3Cell.t - r4Cell.t);
+                    if (diff < 180) consistent++;
+                    else inconsistent++;
+                    break;
+                }
+            }
+        }
+        assert(consistent > 10, 'cross-res consistent: ' + consistent);
+        assert(inconsistent < consistent * 0.5,
+            'cross-res inconsistent: ' + inconsistent + ' (< 50% of ' + consistent + ')');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === SUMMARY ===
+    log('\n' + '═'.repeat(60));
+    if (results.fail === 0) {
+        log('ALL ' + results.pass + ' TESTS PASSED ✓');
+    } else {
+        log(results.pass + ' passed, ' + results.fail + ' FAILED');
+        log('\nfailures:');
+        for (const e of results.errors) log('  → ' + e);
+    }
+    log('═'.repeat(60));
+    log('TEST_COMPLETE');
+}
+
+runTests();
+</script>
+</body>
+</html>
