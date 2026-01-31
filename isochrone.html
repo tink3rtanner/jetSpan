@@ -689,18 +689,24 @@ function parseCellData(cellData) {
 
   if (routeInfo) {
     // EXACT breakdown from route table
-    // routeInfo: {p: [path], l: [leg_times], t: dijkstra_total, s: stops}
+    // routeInfo: {p: [path], l: [leg_times], t: dijkstra_total, s: stops, gt?: osrm_ground_to, go?: 1}
     const originCode = routeInfo.p[0];  // first airport in path
 
-    // ground_to from ORIGINS config
-    const originCity = ORIGINS[currentOrigin];
+    // ground_to: prefer OSRM from route table, fall back to ORIGINS config
     let groundTo = 0;
-    if (originCity) {
-      if (originCity.nearestAirport?.code === originCode) {
-        groundTo = originCity.nearestAirport.groundTimeMinutes || 0;
-      } else {
-        const alt = originCity.alternativeAirports?.find(a => a.code === originCode);
-        groundTo = alt?.groundTimeMinutes || 0;
+    let groundToSrc = 'estimate';
+    if (routeInfo.gt !== undefined) {
+      groundTo = routeInfo.gt;
+      groundToSrc = routeInfo.go ? 'OSRM' : 'estimate';
+    } else {
+      const originCity = ORIGINS[currentOrigin];
+      if (originCity) {
+        if (originCity.nearestAirport?.code === originCode) {
+          groundTo = originCity.nearestAirport.groundTimeMinutes || 0;
+        } else {
+          const alt = originCity.alternativeAirports?.find(a => a.code === originCode);
+          groundTo = alt?.groundTimeMinutes || 0;
+        }
       }
     }
 
@@ -716,6 +722,7 @@ function parseCellData(cellData) {
       totalMinutes: cellData.t,
       breakdown: {
         groundTo,
+        groundToSrc,
         overhead,
         flight: routeInfo.l.reduce((a, b) => a + b, 0),  // sum of per-leg times
         arrival,
@@ -1388,14 +1395,14 @@ async function initMap() {
       if (e.features.length > 0) {
         const props = e.features[0].properties;
         showTooltip(props);
-        // draw route line on hover
+        // draw route line on hover (works for both flight and drive-only cells)
         try {
           const route = JSON.parse(props.route);
           const centroid = JSON.parse(props.centroid);
-          if (route && route.path) {
+          if (route) {
             map.getSource('route-line').setData(buildRouteGeoJSON(route, centroid));
           }
-        } catch(e) {} // drive-only cells may lack route
+        } catch(e) {}
       }
     });
 
@@ -2048,6 +2055,33 @@ async function runTests() {
     assert(parsed.breakdown.arrival === 0, 'drive cell has no arrival');
   }
 
+  // === 13. PROXIMITY CHECK ===
+  show('\n─── 13. Proximity Check ───');
+  // all res 4 cells within 50km of Bristol should be under 8 hours (480m)
+  // catches water filter bugs that let Bristol Channel cells through
+  const bristolCoord = [-2.587, 51.454]; // [lng, lat]
+  let nearBad = 0, nearTotal = 0;
+  for (const [h3Index, cell] of Object.entries(res4)) {
+    const [lat, lng] = h3.cellToLatLng(h3Index);
+    const dist = haversineDistance(bristolCoord, [lng, lat]);
+    if (dist < 50) {
+      nearTotal++;
+      if (cell.t > 480) {
+        nearBad++;
+        show('  BAD: ' + h3Index + ' t=' + cell.t + 'm (' + dist.toFixed(1) + 'km)');
+      }
+    }
+  }
+  assert(nearBad === 0, 'no cells within 50km over 8h: ' + nearBad + ' bad of ' + nearTotal);
+  show('  ' + nearTotal + ' cells within 50km, all under 8h');
+
+  // groundToSrc should be present in parsed flight cells (OSRM or estimate)
+  if (sampleFlight) {
+    const parsed2 = parseCellData(sampleFlight);
+    assert(parsed2.breakdown.groundToSrc === 'OSRM' || parsed2.breakdown.groundToSrc === 'estimate',
+      'groundToSrc is OSRM or estimate: ' + parsed2.breakdown.groundToSrc);
+  }
+
   // === SUMMARY ===
   show('\n' + '═'.repeat(50));
   if (results.fail === 0) {
@@ -2106,9 +2140,9 @@ function showTooltip(properties) {
     }
     html += `<div class="breakdown-row route"><span>${routeStr}</span></div>`;
 
-    // ground to first airport (always estimate from config)
+    // ground to first airport (OSRM if available, else config estimate)
     const firstAirport = (path && path.length > 0) ? path[0] : route.originAirport;
-    html += rowSrc(`Ground to ${firstAirport}`, breakdown.groundTo, 'estimate');
+    html += rowSrc(`Ground to ${firstAirport}`, breakdown.groundTo, breakdown.groundToSrc || 'estimate');
     html += row('Airport overhead', breakdown.overhead);
 
     // per-leg flight times (from route table) or lumped total
@@ -2160,46 +2194,71 @@ function hideTooltip() {
 }
 
 // build geojson for route line visualization on hover
-// returns FeatureCollection with flight legs (solid) + ground segment (dashed)
+// returns FeatureCollection with:
+//   drive-only: dashed origin → cell
+//   flights: dashed origin → first airport, solid flight legs, dashed last airport → cell
 function buildRouteGeoJSON(route, centroid) {
   const features = [];
+  const origin = ORIGINS[currentOrigin];
+  if (!origin) return { type: 'FeatureCollection', features };
+  const originCoords = origin.coordinates; // [lng, lat]
+
+  // drive-only: single dashed line from origin to cell centroid
+  if (route.stops === -1 || route.originAirport === 'drive') {
+    if (centroid) {
+      features.push({
+        type: 'Feature',
+        properties: { segment: 'ground' },
+        geometry: { type: 'LineString', coordinates: [originCoords, [centroid[0], centroid[1]]] }
+      });
+    }
+    return { type: 'FeatureCollection', features };
+  }
+
+  // flight cell: origin → first airport (dashed) + flights (solid) + last airport → cell (dashed)
   if (!route.path || route.path.length < 2) return { type: 'FeatureCollection', features };
 
-  // flight legs: airport → airport along the path
   const flightCoords = [];
   for (const code of route.path) {
     const apt = LOADED_AIRPORTS?.[code];
     if (apt) flightCoords.push([apt.lng, apt.lat]);
   }
+  if (flightCoords.length < 2) return { type: 'FeatureCollection', features };
 
-  if (flightCoords.length >= 2) {
-    // handle antimeridian: if any pair of consecutive points spans >180° lng,
-    // shift negative lngs to keep the line contiguous
-    const needsShift = flightCoords.some((c, i) =>
-      i > 0 && Math.abs(c[0] - flightCoords[i-1][0]) > 180
-    );
-    const adjusted = needsShift
-      ? flightCoords.map(([lng, lat]) => [lng < 0 ? lng + 360 : lng, lat])
-      : flightCoords;
+  // collect all points for antimeridian detection
+  const allPts = [originCoords, ...flightCoords];
+  if (centroid) allPts.push([centroid[0], centroid[1]]);
+  const needsShift = allPts.some((c, i) =>
+    i > 0 && Math.abs(c[0] - allPts[i-1][0]) > 180
+  );
+  const shift = (coord) => needsShift && coord[0] < 0
+    ? [coord[0] + 360, coord[1]] : [...coord];
 
+  const adjOrigin = shift(originCoords);
+  const adjFlights = flightCoords.map(shift);
+
+  // ground-to: origin → first airport (dashed)
+  features.push({
+    type: 'Feature',
+    properties: { segment: 'ground' },
+    geometry: { type: 'LineString', coordinates: [adjOrigin, adjFlights[0]] }
+  });
+
+  // flight legs: airport → airport (solid)
+  features.push({
+    type: 'Feature',
+    properties: { segment: 'flight' },
+    geometry: { type: 'LineString', coordinates: adjFlights }
+  });
+
+  // ground-from: last airport → cell centroid (dashed)
+  if (centroid) {
+    const destCoord = shift([centroid[0], centroid[1]]);
     features.push({
       type: 'Feature',
-      properties: { segment: 'flight' },
-      geometry: { type: 'LineString', coordinates: adjusted }
+      properties: { segment: 'ground' },
+      geometry: { type: 'LineString', coordinates: [adjFlights[adjFlights.length - 1], destCoord] }
     });
-
-    // ground segment: last airport → cell centroid (lighter dashed line)
-    if (centroid) {
-      const lastApt = adjusted[adjusted.length - 1];
-      let destLng = centroid[0];
-      // match antimeridian shift if applied
-      if (needsShift && destLng < 0) destLng += 360;
-      features.push({
-        type: 'Feature',
-        properties: { segment: 'ground' },
-        geometry: { type: 'LineString', coordinates: [lastApt, [destLng, centroid[1]]] }
-      });
-    }
   }
 
   return { type: 'FeatureCollection', features };

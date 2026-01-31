@@ -356,6 +356,24 @@ async function runTests() {
         let driveWithOsrm = Object.entries(res4).find(([k, v]) => v.d === 1 && v.g === 1 && v.t > 40 && v.t < 120);
         assert(driveWithOsrm, 'found mid-range OSRM drive cell: ' +
             (driveWithOsrm ? driveWithOsrm[1].t + 'm' : 'none'));
+
+        // proximity sanity: no drive-only cell should exceed 480m (8h)
+        // drive-only cells are all near Bristol — anything over 8h is a water/routing bug
+        let badDrive = 0;
+        for (const [k, v] of Object.entries(res4)) {
+            if (v.d === 1 && v.t > 480) badDrive++;
+        }
+        assert(badDrive === 0, 'no drive-only cells over 8h: found ' + badDrive);
+
+        // route table should have OSRM ground_to for BRS
+        const routeResp = await fetch('/data/isochrones/bristol/routes.json');
+        const routes = await routeResp.json();
+        // find any route going through BRS — its gt should be OSRM
+        const brsRoute = Object.values(routes).find(r => r.p[0] === 'BRS');
+        if (brsRoute) {
+            assert(brsRoute.gt !== undefined, 'BRS route has OSRM ground_to (gt): ' + brsRoute.gt + 'm');
+            assert(brsRoute.go === 1, 'BRS route ground_to source is OSRM (go=1)');
+        }
     } catch (e) {
         log('  ERROR: ' + e.message);
         results.fail++;

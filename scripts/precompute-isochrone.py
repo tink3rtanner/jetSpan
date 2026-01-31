@@ -53,10 +53,6 @@ MAX_GROUND_KM = 400
 # ground speed estimate (where no OSRM data)
 DEFAULT_GROUND_KPH = 40
 
-# water cell detection: if OSRM time > haversine time * this ratio,
-# the cell center is probably over water (OSRM routes around)
-WATER_DETOUR_RATIO = 1.4
-
 
 # =============================================================================
 # DATA LOADING
@@ -219,12 +215,17 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
             if dist_km > MAX_GROUND_KM:
                 continue
 
-            # ground_from: prefer OSRM, fall back to haversine
+            # ground_from: prefer OSRM, fall back to haversine only when
+            # no OSRM data exists for airport at all. if airport has OSRM
+            # data but cell is unreachable (None), skip — cell is likely water.
             osrm_time = osrm_ground_time(osrm_data, code, lat, lng)
             used_osrm = False
-            if osrm_time is None or osrm_time == -1:
-                # no OSRM data for this airport — haversine fallback
+            if osrm_time == -1:
+                # no OSRM data for this airport at all — haversine fallback ok
                 ground_from = estimate_ground_minutes(dist_km)
+            elif osrm_time is None:
+                # airport has OSRM data but can't reach this cell — water/no road
+                continue
             else:
                 ground_from = osrm_time
                 used_osrm = True
@@ -280,12 +281,8 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
             origin_osrm = None
 
         if origin_osrm is not None:
-            # have real drive time from origin city center
-            # water filter: if OSRM >> haversine, routing around water
-            hav_estimate = estimate_ground_minutes(drive_dist)
-            if hav_estimate > 0 and origin_osrm > hav_estimate * WATER_DETOUR_RATIO:
-                pass  # probable water cell — skip drive option
-            elif origin_osrm < best_total:
+            # OSRM route exists from origin to this cell — use it directly
+            if origin_osrm < best_total:
                 return origin_osrm, {
                     "origin_airport": "drive",
                     "dest_airport": "drive",
@@ -300,8 +297,8 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
                     "ground_from": 0,
                     "osrm": True,
                 }
-        else:
-            # no origin OSRM — haversine fallback from city center
+        elif not origin_ground:
+            # no origin OSRM data at all — haversine fallback ok
             drive_time = estimate_ground_minutes(drive_dist)
             if drive_time < best_total:
                 return drive_time, {
@@ -318,6 +315,7 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
                     "ground_from": 0,
                     "osrm": False,
                 }
+        # else: origin OSRM data exists but cell not in it — water/unreachable, skip drive-only
 
     return best_total, best_info
 
@@ -326,13 +324,15 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
 # ROUTE TABLE
 # =============================================================================
 
-def build_route_table(best_times, graph):
+def build_route_table(best_times, graph, airports=None, origin_ground=None):
     """
     build per-airport route table with full paths and per-leg flight times.
     this is the data the client needs for tooltips / route display.
     keyed by destination airport code.
+    when origin_ground is available, includes OSRM ground_to times.
     """
     routes = {}
+    osrm_count = 0
     for code, result in best_times.items():
         # extract per-leg flight times from the graph edges
         legs = []
@@ -341,12 +341,29 @@ def build_route_table(best_times, graph):
             to_apt = result.path[i + 1]
             ft = graph.edges.get((from_apt, to_apt), 0)
             legs.append(ft)
-        routes[code] = {
+        entry = {
             'p': result.path,   # full airport sequence
             'l': legs,          # per-leg flight minutes
             't': result.total_time,  # dijkstra total (ground_to + overhead + flights + connections)
             's': result.stops   # number of stops
         }
+        # look up OSRM ground_to for the origin airport in this route
+        if origin_ground and airports:
+            first_apt = result.path[0] if result.path else None
+            apt = airports.get(first_apt) if first_apt else None
+            if apt:
+                try:
+                    apt_cell6 = h3.latlng_to_cell(apt['lat'], apt['lng'], 6)
+                    osrm_gt = origin_ground.get(apt_cell6)
+                    if osrm_gt is not None:
+                        entry['gt'] = osrm_gt   # ground_to minutes (OSRM)
+                        entry['go'] = 1          # ground_to source: OSRM
+                        osrm_count += 1
+                except Exception:
+                    pass
+        routes[code] = entry
+    if osrm_count:
+        print(f"  OSRM ground_to: {osrm_count}/{len(routes)} airports")
     return routes
 
 
@@ -438,16 +455,16 @@ def precompute_origin(origin_name, airports, routes):
     print(f"  dijkstra done in {dijkstra_time:.1f}s: {len(best_times)} airports reachable")
     print(f"  direct={by_stops.get(0,0)}, 1-stop={by_stops.get(1,0)}, 2-stop={by_stops.get(2,0)}")
 
-    # step 2: build route table (full paths + per-leg times for tooltips)
-    print("\nbuilding route table...")
-    route_table = build_route_table(best_times, graph)
-    print(f"  {len(route_table)} airport routes")
-
-    # step 3: load OSRM ground data (road-network driving times)
+    # step 2: load OSRM ground data (road-network driving times)
     print("\nloading OSRM ground data...")
     osrm_data = load_osrm_ground_data()
     print("loading origin ground data...")
     origin_ground = load_origin_ground_data(origin_name)
+
+    # step 3: build route table (full paths + per-leg times for tooltips)
+    print("\nbuilding route table...")
+    route_table = build_route_table(best_times, graph, airports, origin_ground)
+    print(f"  {len(route_table)} airport routes")
 
     # step 4: build spatial index of reachable airports
     print("\nbuilding spatial index...")
