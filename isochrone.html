@@ -465,6 +465,13 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div class="toggle-row">
+        <span>OSRM coverage</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-osrm">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
       <div class="slider-row">
         <div class="slider-header">
           <span>Color scale</span>
@@ -1118,7 +1125,12 @@ function getTimeBandColor(totalMinutes) {
 function recolorGrid() {
   if (!gridData || !map) return;
   for (const f of gridData.features) {
-    f.properties.color = getTimeBandColor(f.properties.travelTimeMinutes);
+    if (showOSRMCoverage) {
+      // red/green by OSRM coverage: green = OSRM used, red = haversine estimate
+      f.properties.color = f.properties.osrm ? '#22c55e' : '#ef4444';
+    } else {
+      f.properties.color = getTimeBandColor(f.properties.travelTimeMinutes);
+    }
   }
   map.getSource('hexgrid').setData(gridData);
 }
@@ -1170,6 +1182,7 @@ let currentOrigin = 'bristol';
 let gridData = null;
 let currentResolution = 3;
 let isUpdatingGrid = false;
+let showOSRMCoverage = false;  // toggle: red/green hexes by OSRM coverage
 
 function getResolutionForZoom(zoom) {
   // all resolutions precomputed: res 1-4 in base JSON, res 5-6 lazy-loaded chunks
@@ -2082,6 +2095,39 @@ async function runTests() {
       'groundToSrc is OSRM or estimate: ' + parsed2.breakdown.groundToSrc);
   }
 
+  // === 14. DISCONTINUITY CHECK ===
+  show('\n─── 14. Neighbor Discontinuities ───');
+  // adjacent res-4 cells should not differ by more than 10h (600m).
+  // catches OSRM boundary artifacts where ground_from jumps at crawl radius.
+  const MAX_NEIGHBOR_DIFF = 600; // minutes
+  let discCount = 0, discWorst = 0, pairsChecked = 0;
+  const cellKeys4 = Object.keys(res4);
+  const cellSet4 = new Set(cellKeys4);
+  // sample every 5th cell for speed (res 4 has ~110k cells)
+  for (let i = 0; i < cellKeys4.length; i += 5) {
+    const cellId = cellKeys4[i];
+    const tA = res4[cellId].t;
+    if (!tA || tA <= 0) continue;
+    try {
+      const neighbors = h3.gridRing(cellId, 1);
+      for (const nb of neighbors) {
+        if (!cellSet4.has(nb)) continue;
+        pairsChecked++;
+        const tB = res4[nb].t;
+        if (!tB || tB <= 0) continue;
+        const diff = Math.abs(tA - tB);
+        if (diff > MAX_NEIGHBOR_DIFF) {
+          discCount++;
+          if (diff > discWorst) discWorst = diff;
+        }
+      }
+    } catch(e) {}
+  }
+  show('  checked ' + pairsChecked + ' neighbor pairs (sampled)');
+  // allow some discontinuities at coastlines/islands, but not thousands
+  assert(discCount < 500, 'neighbor discontinuities (>' + MAX_NEIGHBOR_DIFF + 'm): ' + discCount + ' (want <500)');
+  show('  ' + discCount + ' discontinuities, worst=' + discWorst + 'm');
+
   // === SUMMARY ===
   show('\n' + '═'.repeat(50));
   if (results.fail === 0) {
@@ -2278,6 +2324,11 @@ document.getElementById('toggle-grid').addEventListener('change', (e) => {
   const visibility = e.target.checked ? 'visible' : 'none';
   map.setLayoutProperty('hexgrid-fill', 'visibility', visibility);
   map.setLayoutProperty('hexgrid-line', 'visibility', visibility);
+});
+
+document.getElementById('toggle-osrm').addEventListener('change', (e) => {
+  showOSRMCoverage = e.target.checked;
+  recolorGrid();
 });
 
 // color scale slider: recolor grid + update legend on change

@@ -50,6 +50,11 @@ CHUNK_PARENT_RES = {5: 1, 6: 2}
 # max ground distance from airport to cell (km)
 MAX_GROUND_KM = 400
 
+# OSRM crawl radius (km) — must match osrm-crawler.py MAX_DRIVE_KM.
+# cells within this radius with no OSRM data are water/unreachable.
+# cells beyond this radius fall back to haversine (OSRM wasn't crawled there).
+OSRM_CRAWL_RADIUS_KM = 200
+
 # ground speed estimate (where no OSRM data)
 DEFAULT_GROUND_KPH = 40
 
@@ -215,17 +220,21 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
             if dist_km > MAX_GROUND_KM:
                 continue
 
-            # ground_from: prefer OSRM, fall back to haversine only when
-            # no OSRM data exists for airport at all. if airport has OSRM
-            # data but cell is unreachable (None), skip — cell is likely water.
+            # ground_from: prefer OSRM, fall back to haversine.
+            # OSRM crawl only covers cells within OSRM_CRAWL_RADIUS_KM of airport.
+            # if cell is within that radius and OSRM can't reach it → water/skip.
+            # if cell is beyond that radius → OSRM wasn't crawled there, haversine ok.
             osrm_time = osrm_ground_time(osrm_data, code, lat, lng)
             used_osrm = False
             if osrm_time == -1:
-                # no OSRM data for this airport at all — haversine fallback ok
+                # no OSRM data for this airport at all — haversine fallback
                 ground_from = estimate_ground_minutes(dist_km)
             elif osrm_time is None:
-                # airport has OSRM data but can't reach this cell — water/no road
-                continue
+                # airport has OSRM data but cell not found
+                if dist_km <= OSRM_CRAWL_RADIUS_KM:
+                    continue  # within crawl radius → water/unreachable
+                else:
+                    ground_from = estimate_ground_minutes(dist_km)  # beyond crawl → haversine
             else:
                 ground_from = osrm_time
                 used_osrm = True
@@ -570,6 +579,15 @@ def save_result(origin_name, base_data, route_table, chunk_data):
 
     total_mb = (base_path.stat().st_size + routes_path.stat().st_size + total_chunk_bytes) / 1024 / 1024
     print(f"\ntotal output: {total_mb:.1f} MB")
+
+    # cleanup: remove macOS duplicate artifacts ("filename 2.json.gz")
+    import glob
+    dupes = glob.glob(str(origin_dir / "**" / "* 2.json.gz"), recursive=True)
+    if dupes:
+        for d in dupes:
+            os.remove(d)
+        print(f"  cleaned {len(dupes)} duplicate files")
+
     return base_path
 
 
