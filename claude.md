@@ -34,7 +34,7 @@ JetSpan visualizes flight travel times on a 3D globe using hexagonal isochrone c
 - Lazy-loaded gzipped chunks for res 5-6 (DecompressionStream API)
 - Route table with per-leg flight times for accurate tooltip breakdowns
 - Interactive tooltips with full multi-stop routing breakdown
-- OSRM-based ground transport times (partial, europe + north america)
+- OSRM-based ground transport times (complete, all regions, pending integration)
 - Drive-only zone near origin (cells where driving is faster than flying)
 
 ## Data Pipeline
@@ -78,8 +78,9 @@ GitHub Pages auto-gzips the base JSON; chunks are pre-gzipped and decompressed c
 - `dijkstra_router.py` — core routing algorithm (FlightGraph + DijkstraRouter)
 - `fetch-airports.py` — download airport data
 - `crawl-amadeus.py` — crawl route data (needs AMADEUS_API_KEY/SECRET env vars)
-- `compute-ground-times.py` — compute OSRM ground times (~50h for all airports)
-- `osrm-crawler.py` — long-running OSRM crawler with checkpoint/resume
+- `compute-ground-times.py` — original OSRM ground times script (superseded by crawler)
+- `osrm-crawler.py` — OSRM crawler with checkpoint/resume (crawl complete, 1201 airports)
+- `check-crawler.sh` — quick pi crawler status check
 - `sanity-checks.py` — validate data
 
 See `scripts/ROUTING.md` for routing algorithm documentation.
@@ -116,21 +117,22 @@ All rendering is pre-computed. No on-demand computation. Chunk loading:
 ### Antimeridian Handling
 Cells crossing 180deg longitude are normalized by shifting negative longitudes to positive (adding 360) to keep polygons contiguous.
 
-## OSRM Ground Times Crawl (In Progress)
+## OSRM Ground Times (Integrated, Partial Coverage)
 
-Crawler running on raspberry pi, hitting the demo OSRM server.
+1,201 airports crawled via OSRM demo server. 1.6M cells, 34 MB across 8 region files.
+Data integrated into precompute — 19,363 flight cells (16%) and 97 drive cells have OSRM ground times.
+Toggle in settings panel shows red/green OSRM coverage overlay.
 
-**Scripts:**
-- `scripts/osrm-crawler.py` — long-running crawler with checkpoint/resume
-- `scripts/check-crawler.sh` — quick status check (run from mac)
+**Coverage gap:** only 1,132 of 3,139 reachable airports (36%) have OSRM data.
+The remaining 2,007 airports use haversine straight-line estimates for ground_from times.
+The OSRM demo server crawler has completed — this is all available data from that source.
 
-**Pi details:**
-- host: `raspberrypi.local`, user: `joshpriebe`
-- venv: `~/jetspan/venv/bin/python`
-- output: `~/jetspan/data/ground/{region}.json`
-
-**To check:** `bash scripts/check-crawler.sh`
-**To sync data back:** `scp raspberrypi.local:~/jetspan/data/ground/*.json data/ground/`
+**Smarter coverage plan options:**
+- Self-hosted OSRM instance (no rate limits, full global coverage, needs ~50GB RAM for planet file)
+- Valhalla or GraphHopper as alternative routing engines (open-source, self-hostable)
+- OpenRouteService API (free tier: 2000 req/day, would take weeks for full coverage)
+- Hybrid: OSRM for major regions, haversine with empirical correction factors for remote areas
+- Targeted crawl: prioritize the ~500 airports with highest route connectivity first
 
 ## Performance Notes
 
@@ -141,7 +143,7 @@ Crawler running on raspberry pi, hitting the demo OSRM server.
 
 ## Remaining Tasks
 
-1. **Run full OSRM** — crawler on pi, ~36h remaining
+1. **Expand OSRM coverage** — self-hosted instance or alternative routing engine (see coverage plan above)
 2. **Crawl actual flight times** — amadeus flight offers API for real durations
 3. **Add more origin cities** — london, NYC, tokyo etc. (run precompute per origin)
 4. **UI cleanup** — collapse settings behind (i) button
@@ -152,8 +154,13 @@ Crawler running on raspberry pi, hitting the demo OSRM server.
 - Gzipped chunks for GitHub Pages deployment (~74 MB vs ~434 MB raw)
 - Route table with per-leg breakdown
 - Color scale slider
-- OSRM ground data integration (partial)
+- OSRM ground data crawl complete (1201 airports, 1.6M cells, 8 regions)
+- OSRM data integrated into precompute (36% airport coverage)
+- OSRM coverage toggle (red/green overlay in settings)
+- OSRM boundary discontinuity fix (haversine fallback beyond crawl radius)
 - Drive-only zone near origin
 - Water filtering via OSRM detour ratio
-- Comprehensive test suite (standalone + in-app)
+- Comprehensive test suite (standalone 91 + in-app 111 tests)
+- Smoothness distribution test (p50/p90/p95, OSRM boundary, drive-fly boundary)
+- Discontinuity analysis tool (scripts/analyze-discontinuities.py)
 - All 3139 reachable airports shown on map

@@ -45,7 +45,7 @@
 - Alternative airports allow routing via major hubs (e.g., Bristol can route via LHR)
 
 ### Ground Transport (`data/ground/{region}.json`)
-- OSRM driving times (partial — 3 airports tested so far)
+- OSRM driving times (complete — 1201 airports, 1.6M cells, not yet integrated)
 - Lazy-loaded by region
 
 ## Travel Time Calculation
@@ -179,7 +179,7 @@ map.on('style.load', () => {
 1. **Higher-res rendering** - per-resolution file splitting, selective res 5
 2. **Real flight times** - crawl amadeus flight offers API
 3. **More origins** - run precompute per city
-4. **Better ground transport** - full OSRM (running on Pi)
+4. **Integrate ground transport** - OSRM crawl done, needs isochrone recompute
 5. **Web Workers** - offload on-demand computation (if kept)
 
 ## Running Locally
@@ -198,7 +198,7 @@ jetspan/
 │   ├── airports.json           # 4518 airports
 │   ├── routes.json             # 58k routes
 │   ├── isochrones/bristol.json # Pre-computed isochrone (8.7 MB)
-│   └── ground/europe.json      # OSRM ground times (partial)
+│   └── ground/{region}.json     # OSRM ground times (complete, 8 regions)
 ├── scripts/
 │   ├── dijkstra_router.py      # Core routing algorithm
 │   ├── precompute-isochrone.py  # Generates isochrone JSON

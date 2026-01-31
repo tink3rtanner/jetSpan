@@ -94,12 +94,11 @@ JetSpan uses a multi-stage data pipeline to provide flight travel time visualiza
 
 ---
 
-### `data/ground/europe.json`
+### `data/ground/{region}.json`
 
-**Source**: OSRM demo server
-**Script**: `scripts/compute-ground-times.py`
-**Size**: ~98 KB (test data only)
-**Coverage**: 3 airports (BRS, LHR, JFK)
+**Source**: OSRM demo server via `scripts/osrm-crawler.py`
+**Size**: ~34 MB total across 8 region files
+**Coverage**: 1,201 large airports, 1.6M cells
 
 ```json
 {
@@ -112,7 +111,7 @@ JetSpan uses a multi-stage data pipeline to provide flight travel time visualiza
 }
 ```
 
-**Status**: Partial - full computation (~50 hours) not yet run.
+**Status**: Complete. Not yet integrated — needs isochrone recompute to take effect.
 
 ---
 

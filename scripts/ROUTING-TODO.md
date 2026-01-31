@@ -42,7 +42,7 @@ dijkstra runs inside `precompute-isochrone.py`, outputs compact JSON per H3 cell
 ### 4. ground transport improvements (medium value, high effort)
 
 options:
-- run OSRM for more regions (already have europe, need US/asia)
+- ~~run OSRM for more regions~~ (done — all 8 regions, 1201 airports)
 - or just hardcode major origin cities like we did for bristol
 - hardcoding is probably fine for MVP - only need ~10 cities
 

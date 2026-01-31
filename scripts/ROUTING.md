@@ -143,7 +143,7 @@ this is ~10-15% accurate but has discontinuities at bucket boundaries (e.g., 149
 
 ### current state
 
-OSRM data exists for europe only:
+OSRM data exists for all 8 regions (complete as of Jan 2026):
 - `data/ground/europe.json` - BRS coverage
 
 US and other regions use distance-based estimates (40kph default, too conservative).
@@ -186,7 +186,7 @@ MIN_FLY_DISTANCE = {
 
 ### todo
 
-- run `compute-ground-times.py` for US/other regions (~50h compute)
+- ~~run `compute-ground-times.py` for US/other regions~~ (done, all regions crawled)
 - use region-specific speeds as fallback (65mph US, 50kph europe mixed)
 - add region-aware MIN_FLY_DISTANCE when supporting multiple origins
 

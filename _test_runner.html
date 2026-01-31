@@ -379,6 +379,44 @@ async function runTests() {
         results.fail++;
     }
 
+    // === 11. TIME DISTRIBUTION SANITY ===
+    log('\n─── 11. Time Distribution Sanity ───');
+    try {
+        const res4 = isoData.resolutions['4'];
+        const times = Object.values(res4).map(c => c.t).filter(t => t > 0);
+        times.sort((a, b) => a - b);
+        const p10 = times[Math.floor(times.length * 0.10)];
+        const p50 = times[Math.floor(times.length * 0.50)];
+        const p90 = times[Math.floor(times.length * 0.90)];
+        const maxT = times[times.length - 1];
+        log('    ' + times.length + ' cells with t>0');
+        log('    p10=' + p10 + 'm p50=' + p50 + 'm p90=' + p90 + 'm max=' + maxT + 'm');
+
+        // no negative or zero times in valid cells
+        assert(times[0] > 0, 'min time is positive: ' + times[0] + 'm');
+        // max should be under 80h (4800m) — no cell should take >80h from Bristol
+        assert(maxT < 4800, 'max time under 80h: ' + maxT + 'm');
+        // median should be 10-30h — most global land area is far from Bristol
+        assert(p50 > 600 && p50 < 1800, 'median time 10-30h: ' + p50 + 'm');
+        // should have cells across the full range (near + far)
+        assert(p10 < 1000, 'p10 under ~17h (near cells exist): ' + p10 + 'm');
+        assert(p90 > 600, 'p90 over 10h (far cells exist): ' + p90 + 'm');
+
+        // OSRM vs haversine ground_from distribution for flight cells
+        let osrmFlight = 0, havFlight = 0;
+        for (const cell of Object.values(res4)) {
+            if (cell.d) continue; // skip drive-only
+            if (cell.g) osrmFlight++;
+            else havFlight++;
+        }
+        log('    flight cells: ' + osrmFlight + ' OSRM, ' + havFlight + ' haversine ground_from');
+        // at least some flight cells should have OSRM ground_from data
+        assert(osrmFlight > 100, 'OSRM flight cells > 100: ' + osrmFlight);
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
     // === SUMMARY ===
     log('\n' + '═'.repeat(60));
     if (results.fail === 0) {

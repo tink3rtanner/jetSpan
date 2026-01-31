@@ -2109,7 +2109,7 @@ async function runTests() {
     const tA = res4[cellId].t;
     if (!tA || tA <= 0) continue;
     try {
-      const neighbors = h3.gridRing(cellId, 1);
+      const neighbors = h3.gridRingUnsafe(cellId, 1);
       for (const nb of neighbors) {
         if (!cellSet4.has(nb)) continue;
         pairsChecked++;
@@ -2127,6 +2127,73 @@ async function runTests() {
   // allow some discontinuities at coastlines/islands, but not thousands
   assert(discCount < 500, 'neighbor discontinuities (>' + MAX_NEIGHBOR_DIFF + 'm): ' + discCount + ' (want <500)');
   show('  ' + discCount + ' discontinuities, worst=' + discWorst + 'm');
+
+  // === 15. SMOOTHNESS DISTRIBUTION ===
+  show('\n─── 15. Smoothness Distribution ───');
+  {
+    // quantify gradient smoothness: measure time diffs between all adjacent pairs
+    // and check percentile distribution. a smooth map = most neighbors within ~2h.
+    const r4data = LOADED_ISOCHRONE.resolutions['4'];
+    const sKeys = Object.keys(r4data);
+    const sSet = new Set(sKeys);
+    let diffs = [];
+    let osrmBdyDiffs = [];  // pairs where one cell has OSRM, other doesn't
+    let driveFlyDiffs = []; // pairs at drive-only boundary
+
+    // sample every 3rd cell for coverage without being glacial
+    for (let i = 0; i < sKeys.length; i += 3) {
+      const cid = sKeys[i];
+      const cA = r4data[cid];
+      const tA = cA.t;
+      if (!tA || tA <= 0) continue;
+      try {
+        const nbs = h3.gridRingUnsafe(cid, 1);
+        for (const nb of nbs) {
+          if (!sSet.has(nb) || nb <= cid) continue; // dedupe pairs
+          const cB = r4data[nb];
+          const tB = cB.t;
+          if (!tB || tB <= 0) continue;
+          const diff = Math.abs(tA - tB);
+          diffs.push(diff);
+          // classify boundary type
+          if (!!cA.g !== !!cB.g && !cA.d && !cB.d) osrmBdyDiffs.push(diff);
+          if (!!cA.d !== !!cB.d) driveFlyDiffs.push(diff);
+        }
+      } catch(e) {}
+    }
+
+    diffs.sort((a, b) => a - b);
+    const p50 = diffs[Math.floor(diffs.length * 0.50)];
+    const p90 = diffs[Math.floor(diffs.length * 0.90)];
+    const p95 = diffs[Math.floor(diffs.length * 0.95)];
+    const p99 = diffs[Math.floor(diffs.length * 0.99)];
+    const pctUnder120 = (diffs.filter(d => d < 120).length / diffs.length * 100).toFixed(1);
+
+    show('  ' + diffs.length + ' neighbor pairs sampled');
+    show('  p50=' + p50 + 'm p90=' + p90 + 'm p95=' + p95 + 'm p99=' + p99 + 'm');
+    show('  ' + pctUnder120 + '% under 120m');
+
+    assert(parseFloat(pctUnder120) > 70, 'smoothness: >70% of pairs within 2h: ' + pctUnder120 + '%');
+    assert(p50 < 90, 'smoothness: median diff < 90m: ' + p50 + 'm');
+    assert(p95 < 360, 'smoothness: p95 diff < 6h: ' + p95 + 'm');
+
+    // OSRM boundary: pairs where one cell has ground OSRM data and neighbor doesn't
+    if (osrmBdyDiffs.length > 0) {
+      osrmBdyDiffs.sort((a, b) => a - b);
+      const obP95 = osrmBdyDiffs[Math.floor(osrmBdyDiffs.length * 0.95)];
+      const obMax = osrmBdyDiffs[osrmBdyDiffs.length - 1];
+      show('  OSRM boundary: ' + osrmBdyDiffs.length + ' pairs, p95=' + obP95 + 'm, max=' + obMax + 'm');
+      assert(obP95 < 480, 'OSRM boundary p95 < 8h: ' + obP95 + 'm');
+    }
+
+    // drive-fly boundary: cells transitioning from drive-only to flight
+    if (driveFlyDiffs.length > 0) {
+      driveFlyDiffs.sort((a, b) => a - b);
+      const dfP95 = driveFlyDiffs[Math.floor(driveFlyDiffs.length * 0.95)];
+      show('  drive-fly boundary: ' + driveFlyDiffs.length + ' pairs, p95=' + dfP95 + 'm');
+      assert(dfP95 < 480, 'drive-fly boundary p95 < 8h: ' + dfP95 + 'm');
+    }
+  }
 
   // === SUMMARY ===
   show('\n' + '═'.repeat(50));

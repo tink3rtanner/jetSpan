@@ -14,7 +14,7 @@ This session implemented a real data pipeline for the flight isochrone visualiza
 | `fetch-openflights.py` | Downloads OpenFlights routes for sanity checking | Done - 37k routes |
 | `crawl-amadeus.py` | Crawls Amadeus API for route data (uses test env) | Done - 40k routes |
 | `merge-routes.py` | Merges Amadeus + OpenFlights for best coverage | Done - 58k routes |
-| `compute-ground-times.py` | Computes OSRM driving times to H3 cells | Partial - 3 airports tested |
+| `compute-ground-times.py` | Computes OSRM driving times to H3 cells | Done - 1201 airports, 1.6M cells |
 | `sanity-checks.py` | Validates all data files | Done |
 | `dijkstra_router.py` | One-to-all shortest path routing | Done - 3139 airports from Bristol |
 | `precompute-isochrone.py` | Generates pre-computed isochrone JSON | Done - 143k cells, 8.7 MB |
@@ -25,7 +25,7 @@ This session implemented a real data pipeline for the flight isochrone visualiza
 |------|------|----------|
 | `airports.json` | 483 KB | 4518 airports (code -> {name, lat, lng, country, type}) |
 | `routes.json` | 370 KB | 58,359 routes (airport -> [destinations]) |
-| `ground/europe.json` | 98 KB | OSRM ground times for BRS, LHR, JFK (test data) |
+| `ground/{region}.json` | 34 MB total | OSRM ground times, 8 regions, 1201 airports |
 | `routes-stats.json` | ~1 KB | Merge statistics |
 
 ### Raw Files (`raw/` - gitignored)
@@ -92,7 +92,7 @@ async function loadGroundData(region)  // lazy loads ground data
 ### High Priority
 1. **Higher-res rendering** - per-resolution file splitting, zoom threshold tuning, possibly selective res 5
 2. **Strip on-demand fallback** - once fully precomputed, remove grid iteration code from isochrone.html
-3. **Run full OSRM computation** - ~50 hours on Pi overnight
+3. **Integrate OSRM data** - ground times crawl complete, needs isochrone recompute
 4. **Crawl actual flight times** - amadeus flight offers API for real durations
 
 ### UI Improvements
@@ -125,17 +125,13 @@ python3 -m http.server 8765
 open http://localhost:8765/isochrone.html
 ```
 
-## Running OSRM Ground Computation
+## OSRM Ground Computation (Done)
 
-```bash
-# install h3
-pip install h3
+Crawl completed Jan 31 2026 via `scripts/osrm-crawler.py` on raspberry pi.
+1,201 airports, 1.6M cells, ~57 hours on OSRM demo server.
+Data in `data/ground/{region}.json` (34 MB total, 8 region files).
 
-# run (uses demo server, ~50 hours for all 1201 large airports)
-python3 scripts/compute-ground-times.py
-
-# checkpoints every 20 airports, resumable
-```
+To re-run or extend: `python3 scripts/osrm-crawler.py` (checkpoints every airport, resumable).
 
 ## File Structure
 

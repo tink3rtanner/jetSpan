@@ -14,7 +14,7 @@ The UI currently hardcodes Bristol, UK as the sole origin. The origin picker dro
 ### Backend (`scripts/`)
 - `dijkstra_router.py` — `ORIGINS` dict has multiple cities but only bristol has been run
 - `precompute-isochrone.py` — supports `--all` flag but only `bristol.json` exists in `data/isochrones/`
-- Ground time data (`data/ground/`) — only europe region has OSRM data (bristol's region)
+- Ground time data (`data/ground/`) — all 8 regions complete (1201 airports), needs recompute to integrate
 
 ### Data (`data/isochrones/`)
 - Only `bristol.json` exists (8.7 MB, 143k cells, res 1-4)
@@ -27,5 +27,5 @@ The UI currently hardcodes Bristol, UK as the sole origin. The origin picker dro
 2. Run `python scripts/precompute-isochrone.py <origin_key>`
 3. Commit `data/isochrones/<origin>.json`
 4. Re-add origin dropdown in `isochrone.html` (restore select element + event listener)
-5. Consider per-origin ground data if outside europe (`compute-ground-times.py`)
+5. Ground data now covers all regions globally — no per-origin ground compute needed
 6. File size: each origin is ~8-9 MB, so 5 origins = ~45 MB of isochrone JSON. May need to split by resolution or lazy-load.
