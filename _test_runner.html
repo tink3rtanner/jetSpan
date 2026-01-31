@@ -326,6 +326,41 @@ async function runTests() {
         results.fail++;
     }
 
+    // === 10. OSRM GROUND DATA ===
+    log('\n─── 10. OSRM Ground Data ───');
+    try {
+        const res4 = isoData.resolutions['4'];
+        let osrmDrive = 0, havDrive = 0;
+        for (const cell of Object.values(res4)) {
+            if (!cell.d) continue;
+            if (cell.g === 1) osrmDrive++;
+            else havDrive++;
+        }
+        assert(osrmDrive > 0, 'OSRM drive cells exist at res 4: ' + osrmDrive);
+        assert(havDrive >= 0, 'haversine drive cells counted: ' + havDrive);
+        assert(osrmDrive > havDrive * 0.3, 'OSRM cells > 30% of haversine: ' + osrmDrive + ' vs ' + havDrive);
+        log('    ' + osrmDrive + ' OSRM, ' + havDrive + ' haversine drive cells');
+
+        // bath cell: ~20km from Bristol, should be drive-only with OSRM
+        const bathCell = res4['8419583ffffffff'];
+        if (bathCell) {
+            assert(bathCell.d === 1, 'bath cell is drive-only');
+            assert(bathCell.t > 0 && bathCell.t < 60, 'bath cell under 60m: ' + bathCell.t + 'm');
+            assert(bathCell.g === 1, 'bath cell uses OSRM road data');
+        } else {
+            assert(false, 'bath cell 8419583ffffffff not found');
+        }
+
+        // cardiff cell: ~70km, should be drive-only
+        // find a drive-only cell in wales direction (west)
+        let driveWithOsrm = Object.entries(res4).find(([k, v]) => v.d === 1 && v.g === 1 && v.t > 40 && v.t < 120);
+        assert(driveWithOsrm, 'found mid-range OSRM drive cell: ' +
+            (driveWithOsrm ? driveWithOsrm[1].t + 'm' : 'none'));
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
     // === SUMMARY ===
     log('\n' + '═'.repeat(60));
     if (results.fail === 0) {

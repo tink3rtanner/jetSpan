@@ -2006,6 +2006,48 @@ async function runTests() {
   assert(driveCount > 0, 'drive-only zone exists: ' + driveCount + ' cells at res 4');
   assert(driveCount < 500, 'drive-only zone not too large: ' + driveCount + ' cells');
 
+  // === 11. OSRM GROUND DATA ===
+  show('\n─── 11. OSRM Ground Data ───');
+  // some drive-only cells near Bristol should have OSRM flag (g=1)
+  let osrmDrive = 0, havDrive = 0;
+  for (const cell of Object.values(res4)) {
+    if (!cell.d) continue;
+    if (cell.g === 1) osrmDrive++;
+    else havDrive++;
+  }
+  assert(osrmDrive > 0, 'OSRM drive cells exist: ' + osrmDrive + ' at res 4');
+  assert(osrmDrive > havDrive * 0.3, 'OSRM cells outnumber 30% of haversine: ' + osrmDrive + ' osrm vs ' + havDrive + ' hav');
+
+  // specific cell near Bath (res 6 equivalent check via parseCellData)
+  // bath is ~20km from bristol — cell should be drive-only with t < 60m
+  const bathCell = res4['8419583ffffffff'];
+  if (bathCell) {
+    const bathParsed = parseCellData(bathCell);
+    assert(bathParsed.route.stops === -1, 'bath cell is drive-only (not flight)');
+    assert(bathParsed.totalMinutes < 60, 'bath cell under 60m: ' + bathParsed.totalMinutes + 'm');
+    assert(bathParsed.osrm === true, 'bath cell uses OSRM road data');
+  } else {
+    assert(false, 'bath cell 8419583ffffffff not found in res 4');
+  }
+
+  // tooltip breakdown: verify ground legs have correct structure
+  show('\n─── 12. Tooltip Breakdown Structure ───');
+  const sampleFlight = Object.values(res4).find(c => !c.d && c.s === 0);
+  if (sampleFlight) {
+    const parsed = parseCellData(sampleFlight);
+    assert(parsed.breakdown.arrival > 0, 'flight cell has arrival time: ' + parsed.breakdown.arrival + 'm');
+    assert(parsed.breakdown.groundTo >= 0, 'flight cell has groundTo: ' + parsed.breakdown.groundTo + 'm');
+    assert(parsed.breakdown.overhead === 90, 'flight cell overhead is 90m');
+    assert(typeof parsed.osrm === 'boolean', 'osrm flag is boolean');
+  }
+  const sampleDrive = Object.values(res4).find(c => c.d === 1);
+  if (sampleDrive) {
+    const parsed = parseCellData(sampleDrive);
+    assert(parsed.breakdown.groundTo === parsed.totalMinutes, 'drive cell groundTo equals total');
+    assert(parsed.breakdown.overhead === 0, 'drive cell has no overhead');
+    assert(parsed.breakdown.arrival === 0, 'drive cell has no arrival');
+  }
+
   // === SUMMARY ===
   show('\n' + '═'.repeat(50));
   if (results.fail === 0) {
@@ -2045,10 +2087,13 @@ function showTooltip(properties) {
   const container = document.getElementById('tooltip-breakdown');
   let html = '';
 
+  // ground source label (OSRM = real road data, haversine = straight-line estimate)
+  const groundFromSrc = properties.osrm ? 'OSRM' : 'haversine';
+
   if (route.stops === -1 || route.originAirport === 'drive') {
-    // drive-only
+    // drive-only cell
     html += `<div class="breakdown-row route"><span>Drive only</span></div>`;
-    html += row('Drive time', breakdown.groundTo);
+    html += rowSrc('Drive time', breakdown.groundTo, groundFromSrc);
   } else {
     // route line: Bristol → BRS ✈ AMS ✈ NRT → destination
     const originName = ORIGINS[currentOrigin].name.split(',')[0];
@@ -2061,9 +2106,9 @@ function showTooltip(properties) {
     }
     html += `<div class="breakdown-row route"><span>${routeStr}</span></div>`;
 
-    // ground to first airport
+    // ground to first airport (always estimate from config)
     const firstAirport = (path && path.length > 0) ? path[0] : route.originAirport;
-    html += row(`Ground to ${firstAirport}`, breakdown.groundTo);
+    html += rowSrc(`Ground to ${firstAirport}`, breakdown.groundTo, 'estimate');
     html += row('Airport overhead', breakdown.overhead);
 
     // per-leg flight times (from route table) or lumped total
@@ -2083,16 +2128,18 @@ function showTooltip(properties) {
       html += row('Flight time', breakdown.flight);
     }
 
-    // arrival + ground from airport
-    html += row('Arrival + ground', breakdown.arrival + (breakdown.groundFrom || 0));
+    // arrival + ground from destination airport (separate lines)
+    const lastAirport = (path && path.length > 0) ? path[path.length - 1] : route.destAirport;
+    html += row(`Arrival at ${lastAirport}`, breakdown.arrival);
+    if (breakdown.groundFrom > 0) {
+      html += rowSrc(`Ground from ${lastAirport}`, breakdown.groundFrom, groundFromSrc);
+    }
   }
 
-  // debug: cell coords + OSRM status
+  // debug: cell coords
   const centroid = JSON.parse(properties.centroid);
-  const osrmFlag = properties.osrm ? 'OSRM' : 'haversine';
   html += `<div class="breakdown-row" style="opacity:0.5;font-size:11px;margin-top:4px">`;
   html += `<span>${centroid[1].toFixed(3)}, ${centroid[0].toFixed(3)}</span>`;
-  html += `<span>ground: ${osrmFlag}</span>`;
   html += `</div>`;
 
   container.innerHTML = html;
@@ -2101,6 +2148,10 @@ function showTooltip(properties) {
   // helper: one breakdown row
   function row(label, minutes) {
     return `<div class="breakdown-row"><span class="label">${label}</span><span class="value">${formatTime(minutes)}</span></div>`;
+  }
+  // helper: breakdown row with source tag (OSRM/haversine/estimate)
+  function rowSrc(label, minutes, src) {
+    return `<div class="breakdown-row"><span class="label">${label} <span style="opacity:0.5;font-size:11px">(${src})</span></span><span class="value">${formatTime(minutes)}</span></div>`;
   }
 }
 

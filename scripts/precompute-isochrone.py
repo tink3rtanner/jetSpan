@@ -241,13 +241,13 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
 
                 # decompose the dijkstra result for tooltip breakdown
                 # result.total_time = ground_to + overhead(90) + flights + stops*(90+30)
-                origin_ground = next(
+                ground_to = next(
                     (a['ground_time'] for a in origin_cfg['airports']
                      if a['code'] == result.origin_airport), 0
                 )
                 overhead = 90
                 connection_cost = result.stops * (90 + 30)
-                flights_only = result.total_time - origin_ground - overhead - connection_cost
+                flights_only = result.total_time - ground_to - overhead - connection_cost
 
                 best_info = {
                     "origin_airport": result.origin_airport,
@@ -255,7 +255,7 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
                     "is_direct": result.stops == 0,
                     "stops": result.stops,
                     "path": result.path,
-                    "ground_to": origin_ground,
+                    "ground_to": ground_to,
                     "overhead": overhead,
                     "flight": max(0, flights_only),  # guard against rounding
                     "connections": connection_cost,
