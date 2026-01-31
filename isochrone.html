@@ -845,7 +845,10 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
       const cellData = resData[h3Index];
       const result = parseCellData(cellData);
 
-      const color = getTimeBandColor(result.totalMinutes);
+      // respect OSRM coverage toggle: green = OSRM, red = haversine
+      const color = showOSRMCoverage
+        ? (result.osrm ? '#22c55e' : '#ef4444')
+        : getTimeBandColor(result.totalMinutes);
       const boundary = h3.cellToBoundary(h3Index);
 
       // convert boundary to GeoJSON coordinates [lng, lat]
@@ -2192,6 +2195,56 @@ async function runTests() {
       const dfP95 = driveFlyDiffs[Math.floor(driveFlyDiffs.length * 0.95)];
       show('  drive-fly boundary: ' + driveFlyDiffs.length + ' pairs, p95=' + dfP95 + 'm');
       assert(dfP95 < 480, 'drive-fly boundary p95 < 8h: ' + dfP95 + 'm');
+    }
+  }
+
+  // === 16. SAME-AIRPORT OSRM BOUNDARY (BULLSEYE TEST) ===
+  show('\n─── 16. Same-Airport OSRM Boundary ───');
+  {
+    // for cells routed through the same destination airport, check that
+    // OSRM vs haversine ground_from doesn't create bullseye artifacts.
+    // when two adjacent cells both route via e.g. BDA, their times should
+    // be similar — the flight component is identical, only ground_from differs.
+    const r4data = LOADED_ISOCHRONE.resolutions['4'];
+    const sKeys = Object.keys(r4data);
+    const sSet = new Set(sKeys);
+    let sameAptDiffs = [];
+    let worstPair = null;
+
+    for (let i = 0; i < sKeys.length; i += 3) {
+      const cid = sKeys[i];
+      const cA = r4data[cid];
+      if (!cA.t || cA.t <= 0 || cA.d) continue;
+      try {
+        const nbs = h3.gridRingUnsafe(cid, 1);
+        for (const nb of nbs) {
+          if (!sSet.has(nb) || nb <= cid) continue;
+          const cB = r4data[nb];
+          if (!cB.t || cB.t <= 0 || cB.d) continue;
+          // only check pairs routed through same destination airport
+          if (cA.a !== cB.a) continue;
+          // only check pairs where OSRM status differs (the boundary)
+          if (!!cA.g === !!cB.g) continue;
+          const diff = Math.abs(cA.t - cB.t);
+          sameAptDiffs.push(diff);
+          if (!worstPair || diff > worstPair.diff) {
+            worstPair = {diff, apt: cA.a, tA: cA.t, tB: cB.t};
+          }
+        }
+      } catch(e) {}
+    }
+
+    show('  ' + sameAptDiffs.length + ' same-airport OSRM boundary pairs');
+    if (sameAptDiffs.length > 0) {
+      sameAptDiffs.sort((a, b) => a - b);
+      const saP50 = sameAptDiffs[Math.floor(sameAptDiffs.length * 0.50)];
+      const saP95 = sameAptDiffs[Math.floor(sameAptDiffs.length * 0.95)];
+      const saMax = sameAptDiffs[sameAptDiffs.length - 1];
+      show('  p50=' + saP50 + 'm p95=' + saP95 + 'm max=' + saMax + 'm');
+      if (worstPair) show('  worst: ' + worstPair.apt + ' ' + worstPair.tA + '→' + worstPair.tB + 'm');
+      // same airport = same flight time. diff is purely ground_from.
+      // >4h diff = clear bullseye artifact (haversine ocean cells).
+      assert(saP95 < 240, 'same-airport boundary p95 < 4h: ' + saP95 + 'm');
     }
   }
 
