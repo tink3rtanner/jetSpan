@@ -45,7 +45,7 @@
 - Alternative airports allow routing via major hubs (e.g., Bristol can route via LHR)
 
 ### Ground Transport (`data/ground/{region}.json`)
-- OSRM driving times (complete — 1201 airports, 1.6M cells, not yet integrated)
+- OSRM driving times (integrated — 1201 airports, 1.6M cells, 36% of reachable airports)
 - Lazy-loaded by region
 
 ## Travel Time Calculation

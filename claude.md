@@ -12,8 +12,8 @@ After any visual/data change, take screenshots via Chrome browser automation to 
 
 ## Testing
 Two test suites available:
-- **Standalone**: open `http://localhost:8765/_test_runner.html` — tests data files, route table, gzipped chunks, airports, consistency, page integrity (75 tests)
-- **In-app**: call `runTests()` in the browser console on isochrone.html — tests rendering at every zoom level, chunk loading, pan across 7 cities, cell integrity, color mapping (96 tests)
+- **Standalone**: open `http://localhost:8765/_test_runner.html` — tests data files, route table, gzipped chunks, airports, consistency, page integrity, time distribution (91 tests)
+- **In-app**: call `runTests()` in the browser console on isochrone.html — tests rendering at every zoom level, chunk loading, pan across 7 cities, cell integrity, color mapping, smoothness distribution, OSRM boundary (112 tests)
 - **Benchmark**: call `runBenchmark()` in console — performance timing at all zoom levels
 
 ## Project Overview
@@ -34,7 +34,7 @@ JetSpan visualizes flight travel times on a 3D globe using hexagonal isochrone c
 - Lazy-loaded gzipped chunks for res 5-6 (DecompressionStream API)
 - Route table with per-leg flight times for accurate tooltip breakdowns
 - Interactive tooltips with full multi-stop routing breakdown
-- OSRM-based ground transport times (complete, all regions, pending integration)
+- OSRM-based ground transport times (integrated, 36% airport coverage)
 - Drive-only zone near origin (cells where driving is faster than flying)
 
 ## Data Pipeline

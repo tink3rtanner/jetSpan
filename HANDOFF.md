@@ -92,7 +92,7 @@ async function loadGroundData(region)  // lazy loads ground data
 ### High Priority
 1. **Higher-res rendering** - per-resolution file splitting, zoom threshold tuning, possibly selective res 5
 2. **Strip on-demand fallback** - once fully precomputed, remove grid iteration code from isochrone.html
-3. **Integrate OSRM data** - ground times crawl complete, needs isochrone recompute
+3. **Expand OSRM coverage** - 36% of airports covered, need self-hosted instance for full coverage
 4. **Crawl actual flight times** - amadeus flight offers API for real durations
 
 ### UI Improvements

@@ -111,7 +111,7 @@ JetSpan uses a multi-stage data pipeline to provide flight travel time visualiza
 }
 ```
 
-**Status**: Complete. Not yet integrated — needs isochrone recompute to take effect.
+**Status**: Complete and integrated. 1,201 airports (36% of 3,139 reachable) have OSRM ground times. Remaining airports use haversine estimates capped at OSRM max per airport.
 
 ---
 
