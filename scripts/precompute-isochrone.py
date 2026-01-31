@@ -581,11 +581,10 @@ def save_result(origin_name, base_data, route_table, chunk_data):
     print(f"\ntotal output: {total_mb:.1f} MB")
 
     # cleanup: remove macOS duplicate artifacts ("filename 2.json.gz")
-    import glob
-    dupes = glob.glob(str(origin_dir / "**" / "* 2.json.gz"), recursive=True)
+    dupes = list(origin_dir.rglob("* 2.json.gz"))
     if dupes:
         for d in dupes:
-            os.remove(d)
+            d.unlink()
         print(f"  cleaned {len(dupes)} duplicate files")
 
     return base_path
