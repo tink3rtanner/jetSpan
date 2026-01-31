@@ -42,7 +42,6 @@ OSRM_URL = "https://router.project-osrm.org"
 H3_RESOLUTION = 6       # ~10km cells
 MAX_DRIVE_HOURS = 4     # max driving time to compute
 MAX_DRIVE_KM = 200      # max distance from airport
-FALLBACK_SPEED_KMH = 30 # for unreachable cells
 BATCH_SIZE = 100        # osrm limit per request
 REQUEST_DELAY = 0.1     # seconds between requests (server queues anyway, no point waiting)
 CHECKPOINT_EVERY = 1    # checkpoint after every airport (safer for long runs)
@@ -186,10 +185,8 @@ def compute_airport_ground_times(airport_code, airport_lng, airport_lat):
         for (cell, lng, lat, dist), time_min in zip(batch, times):
             if time_min is not None and time_min <= MAX_DRIVE_HOURS * 60:
                 results[cell] = time_min
-            elif time_min is None:
-                fallback = round(dist / FALLBACK_SPEED_KMH * 60)
-                if fallback <= MAX_DRIVE_HOURS * 60:
-                    results[cell] = fallback
+            # if OSRM returns None (no route), skip — don't invent
+            # haversine fallback. no route means water or unreachable.
 
         time.sleep(REQUEST_DELAY)
 
@@ -322,14 +319,20 @@ def main():
     parser = argparse.ArgumentParser(description="OSRM ground times crawler")
     parser.add_argument("--region", help="only process this region")
     parser.add_argument("--status", action="store_true", help="show status only")
+    parser.add_argument("--types", default="large,medium",
+                        help="airport types to include (default: large,medium)")
+    parser.add_argument("--priority-file",
+                        help="file with airport codes in crawl order (one per line)")
     args = parser.parse_args()
 
     # load data
     with open(AIRPORTS_FILE) as f:
         all_airports = json.load(f)
 
-    airports = {k: v for k, v in all_airports.items() if v.get("type") == "large"}
-    log(f"loaded {len(airports)} large airports")
+    allowed_types = set(args.types.split(","))
+    airports = {k: v for k, v in all_airports.items()
+                if v.get("type") in allowed_types}
+    log(f"loaded {len(airports)} airports (types: {args.types})")
 
     ground_data, completed = load_checkpoint()
     log(f"checkpoint: {len(completed)} airports done")
@@ -338,20 +341,31 @@ def main():
         show_status(airports, ground_data, completed)
         return
 
-    # build work queue in region priority order
-    # within europe, UK airports first (bristol focus)
-    work_queue = []
-    for region in REGION_PRIORITY + ["other"]:
-        region_airports = [
-            code for code, apt in airports.items()
-            if get_region(apt.get("country", "")) == region and code not in completed
-        ]
-        if args.region and region != args.region:
-            continue
-        # sort UK airports first within europe
-        if region == "europe":
-            region_airports.sort(key=lambda c: (0 if airports[c].get("country") == "GB" else 1, c))
-        work_queue.extend(region_airports)
+    # build work queue
+    if args.priority_file:
+        # use external priority ordering (from prioritize-crawl.py)
+        priority_path = Path(args.priority_file)
+        if not priority_path.is_absolute():
+            priority_path = REPO_ROOT / priority_path
+        with open(priority_path) as f:
+            priority_codes = [line.strip() for line in f if line.strip()]
+        work_queue = [c for c in priority_codes
+                      if c in airports and c not in completed]
+        log(f"using priority file: {len(work_queue)} airports from {priority_path.name}")
+    else:
+        # default: region priority order, UK airports first within europe
+        work_queue = []
+        for region in REGION_PRIORITY + ["other"]:
+            region_airports = [
+                code for code, apt in airports.items()
+                if get_region(apt.get("country", "")) == region and code not in completed
+            ]
+            if args.region and region != args.region:
+                continue
+            # sort UK airports first within europe
+            if region == "europe":
+                region_airports.sort(key=lambda c: (0 if airports[c].get("country") == "GB" else 1, c))
+            work_queue.extend(region_airports)
 
     if not work_queue:
         log("nothing to do!")

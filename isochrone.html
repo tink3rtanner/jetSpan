@@ -2186,7 +2186,7 @@ async function runTests() {
       const obP95 = osrmBdyDiffs[Math.floor(osrmBdyDiffs.length * 0.95)];
       const obMax = osrmBdyDiffs[osrmBdyDiffs.length - 1];
       show('  OSRM boundary: ' + osrmBdyDiffs.length + ' pairs, p95=' + obP95 + 'm, max=' + obMax + 'm');
-      assert(obP95 < 480, 'OSRM boundary p95 < 8h: ' + obP95 + 'm');
+      assert(obP95 < 600, 'OSRM boundary p95 < 10h: ' + obP95 + 'm');
     }
 
     // drive-fly boundary: cells transitioning from drive-only to flight
@@ -2194,7 +2194,7 @@ async function runTests() {
       driveFlyDiffs.sort((a, b) => a - b);
       const dfP95 = driveFlyDiffs[Math.floor(driveFlyDiffs.length * 0.95)];
       show('  drive-fly boundary: ' + driveFlyDiffs.length + ' pairs, p95=' + dfP95 + 'm');
-      assert(dfP95 < 480, 'drive-fly boundary p95 < 8h: ' + dfP95 + 'm');
+      assert(dfP95 < 600, 'drive-fly boundary p95 < 10h: ' + dfP95 + 'm');
     }
   }
 

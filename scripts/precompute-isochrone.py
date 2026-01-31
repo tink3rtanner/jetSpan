@@ -73,8 +73,10 @@ def load_routes():
     with open(path) as f:
         return json.load(f)
 
-def load_osrm_ground_data():
+def load_osrm_ground_data(airports=None):
     """load all OSRM ground time files from data/ground/*.json.
+    filters out haversine-fallback entries (crawler bug: stored
+    round(dist/30*60) for cells where OSRM returned no route).
     returns {airport_code: {h3_res6_cell: minutes}}."""
     ground_dir = Path(__file__).parent.parent / "data" / "ground"
     osrm = {}
@@ -93,8 +95,124 @@ def load_osrm_ground_data():
                 osrm[code].update(cells)
         except Exception as e:
             print(f"  warning: couldn't load {f.name}: {e}")
+
+    # two-stage OSRM data cleanup
+    if osrm and airports:
+        # stage 1: strip haversine-fallback entries from old crawler bug
+        # (crawler stored round(dist/30*60) when OSRM returned no route)
+        fallback_stripped = 0
+        for code, cells in list(osrm.items()):
+            apt = airports.get(code)
+            if not apt:
+                continue
+            apt_lat, apt_lng = apt['lat'], apt['lng']
+            to_remove = []
+            for cell_hex, minutes in cells.items():
+                try:
+                    cell_lat, cell_lng = h3.cell_to_latlng(cell_hex)
+                except Exception:
+                    continue
+                dist = haversine_km(cell_lat, cell_lng, apt_lat, apt_lng)
+                if dist < 5:
+                    continue
+                expected = round(dist / 30 * 60)
+                if minutes == expected:
+                    to_remove.append(cell_hex)
+            for cell_hex in to_remove:
+                del cells[cell_hex]
+            fallback_stripped += len(to_remove)
+        if fallback_stripped:
+            print(f"  stripped {fallback_stripped} haversine-fallback entries")
+
+        # stage 2: strip OSRM coordinate-snap artifacts
+        # OSRM snaps ocean coordinates to nearest road — cells far offshore
+        # get realistic-looking drive times to the snapped coastal point.
+        # detect via: (a) hard speed cap, (b) island correlation detection
+        snap_stripped = 0
+        island_airports = []
+        for code, cells in list(osrm.items()):
+            apt = airports.get(code)
+            if not apt:
+                continue
+            apt_lat, apt_lng = apt['lat'], apt['lng']
+
+            # compute distance + implied speed per cell
+            cell_data = []  # (hex, dist_km, minutes, speed_kmh)
+            for cell_hex, minutes in cells.items():
+                if minutes <= 0:
+                    continue
+                try:
+                    cell_lat, cell_lng = h3.cell_to_latlng(cell_hex)
+                except Exception:
+                    continue
+                dist = haversine_km(cell_lat, cell_lng, apt_lat, apt_lng)
+                if dist < 0.5:
+                    continue  # airport cell
+                speed = dist / (minutes / 60)
+                cell_data.append((cell_hex, dist, minutes, speed))
+
+            if len(cell_data) < 5:
+                continue
+
+            # (a) hard speed cap — no road network sustains >130 km/h avg
+            to_remove = set()
+            for cell_hex, dist, minutes, speed in cell_data:
+                if speed > 130:
+                    to_remove.add(cell_hex)
+
+            # (b) island snap detection: if time-distance correlation is
+            # low, most cells are ocean-snapped. apply tighter filtering.
+            remaining = [(h, d, m, s) for h, d, m, s in cell_data
+                         if h not in to_remove]
+
+            if len(remaining) > 20:
+                dists = [d for _, d, _, _ in remaining]
+                times = [m for _, _, m, _ in remaining]
+                n = len(remaining)
+
+                # pearson r(distance, time) — high for continental (roads
+                # get longer with distance), low for islands (all cells
+                # snap to same small road network regardless of distance)
+                sum_d = sum(dists)
+                sum_t = sum(times)
+                sum_dt = sum(d * t for d, t in zip(dists, times))
+                sum_d2 = sum(d * d for d in dists)
+                sum_t2 = sum(t * t for t in times)
+                den = ((n * sum_d2 - sum_d**2) *
+                       (n * sum_t2 - sum_t**2)) ** 0.5
+                r = (n * sum_dt - sum_d * sum_t) / den if den > 0 else 0
+
+                if r < 0.6:
+                    # low correlation → island snap pattern
+                    # estimate road extent from cells with on-island speeds
+                    # (30 km/h = typical winding island roads)
+                    slow = [d for _, d, _, s in remaining if s < 30]
+                    island_radius = max(slow) * 1.2 if slow else 15
+                    for h, d, m, s in remaining:
+                        if d > island_radius:
+                            to_remove.add(h)
+                    kept = len(remaining) - sum(
+                        1 for h, d, m, s in remaining if d > island_radius)
+                    island_airports.append(
+                        f"{code}(r={r:.2f},rad={island_radius:.0f}km,"
+                        f"kept={kept})")
+
+            for h in to_remove:
+                if h in cells:
+                    del cells[h]
+            snap_stripped += len(to_remove)
+
+        if snap_stripped:
+            print(f"  stripped {snap_stripped} OSRM snap artifacts")
+        if island_airports:
+            for info in island_airports[:20]:
+                print(f"    island: {info}")
+            if len(island_airports) > 20:
+                print(f"    ...and {len(island_airports) - 20} more")
+
     if osrm:
-        print(f"  OSRM ground data: {len(osrm)} airports ({', '.join(sorted(osrm.keys()))})")
+        total_cells = sum(len(c) for c in osrm.values())
+        print(f"  OSRM ground data: {len(osrm)} airports, {total_cells} cells")
     return osrm
 
 
@@ -131,19 +249,6 @@ def estimate_ground_minutes(dist_km, speed_kph=DEFAULT_GROUND_KPH):
     return round((dist_km / speed_kph) * 60)
 
 
-def compute_osrm_max_per_airport(osrm_data):
-    """for each airport with OSRM data, find the max ground time.
-    used to cap haversine fallback — prevents ocean cells from getting
-    absurd driving times (e.g. bermuda: max OSRM ~30m, haversine 300m+)."""
-    caps = {}
-    for code, cells in osrm_data.items():
-        if cells:
-            caps[code] = max(cells.values())
-    if caps:
-        island_airports = {c: t for c, t in caps.items() if t < 60}
-        print(f"  OSRM caps: {len(caps)} airports, "
-              f"{len(island_airports)} island-like (<60m max)")
-    return caps
 
 
 # =============================================================================
@@ -205,21 +310,18 @@ def osrm_ground_time(osrm_data, airport_code, lat, lng):
 
 
 def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
-                    osrm_data=None, origin_ground=None, osrm_caps=None,
+                    osrm_data=None, origin_ground=None,
                     index_res=2, k_rings=3):
     """
     find best route to cell at (lat, lng) using spatial index.
     uses OSRM ground data when available; falls back to haversine.
     origin_ground: {h3_cell: minutes} from origin city center (for drive-only check).
-    osrm_caps: {airport_code: max_osrm_minutes} — caps haversine fallback.
     returns (total_minutes, route_info) or (None, None).
     """
     if osrm_data is None:
         osrm_data = {}
     if origin_ground is None:
         origin_ground = {}
-    if osrm_caps is None:
-        osrm_caps = {}
 
     # check nearby buckets
     try:
@@ -253,13 +355,10 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
                 if dist_km <= OSRM_CRAWL_RADIUS_KM:
                     continue  # within crawl radius → water/unreachable
                 else:
-                    # beyond crawl radius — haversine, but cap at OSRM max.
-                    # prevents island airports (bermuda, etc.) from getting
-                    # absurd ground_from times for ocean cells.
-                    ground_from = estimate_ground_minutes(dist_km)
-                    cap = osrm_caps.get(code)
-                    if cap is not None:
-                        ground_from = min(ground_from, cap + 30)  # +30m slack
+                    # beyond crawl radius — OSRM was crawled for this airport
+                    # but didn't include this cell. trust that: it's water,
+                    # unreachable, or too far. don't backfill with haversine.
+                    continue
             else:
                 ground_from = osrm_time
                 used_osrm = True
@@ -425,7 +524,7 @@ def compact_cell(travel_time, route):
 
 
 def iterate_resolution(res, spatial_index, airports, origin_cfg,
-                       osrm_data=None, origin_ground=None, osrm_caps=None):
+                       osrm_data=None, origin_ground=None):
     """iterate all h3 cells at a resolution, return dict of cell -> compact data."""
     start = time.time()
     cells = get_h3_cells_global(res)
@@ -447,8 +546,7 @@ def iterate_resolution(res, spatial_index, airports, origin_cfg,
         lat, lng = h3.cell_to_latlng(cell)
         travel_time, route = query_cell_fast(
             lat, lng, spatial_index, airports, origin_cfg,
-            osrm_data=osrm_data, origin_ground=origin_ground,
-            osrm_caps=osrm_caps
+            osrm_data=osrm_data, origin_ground=origin_ground
         )
 
         if travel_time is not None:
@@ -492,8 +590,7 @@ def precompute_origin(origin_name, airports, routes):
 
     # step 2: load OSRM ground data (road-network driving times)
     print("\nloading OSRM ground data...")
-    osrm_data = load_osrm_ground_data()
-    osrm_caps = compute_osrm_max_per_airport(osrm_data)
+    osrm_data = load_osrm_ground_data(airports)
     print("loading origin ground data...")
     origin_ground = load_origin_ground_data(origin_name)
 
@@ -528,8 +625,7 @@ def precompute_origin(origin_name, airports, routes):
         print(f"\nresolution {res}...")
         res_data, computed, skipped, elapsed = iterate_resolution(
             res, spatial_index, airports, origin_cfg,
-            osrm_data=osrm_data, origin_ground=origin_ground,
-            osrm_caps=osrm_caps
+            osrm_data=osrm_data, origin_ground=origin_ground
         )
 
         if res in BASE_RESOLUTIONS:
