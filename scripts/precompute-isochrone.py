@@ -564,13 +564,19 @@ def save_result(origin_name, base_data, route_table, chunk_data):
         if chunk_dir.exists():
             shutil.rmtree(chunk_dir)
         chunk_dir.mkdir(exist_ok=True)
+        # tell macOS Spotlight to skip this directory
+        (chunk_dir / ".metadata_never_index").touch()
         total_cells = 0
         for parent, cells in chunks.items():
             chunk_path = chunk_dir / f"{parent}.json.gz"
+            # write to temp file, then atomic rename — prevents macOS
+            # Spotlight/Finder from creating "filename 2.json.gz" duplicates
+            tmp_path = chunk_path.with_suffix('.tmp')
             raw = json.dumps(cells).encode('utf-8')
             total_raw_bytes += len(raw)
-            with gzip.open(chunk_path, 'wb', compresslevel=9) as f:
+            with gzip.open(tmp_path, 'wb', compresslevel=9) as f:
                 f.write(raw)
+            tmp_path.rename(chunk_path)
             total_chunk_bytes += chunk_path.stat().st_size
             total_cells += len(cells)
         raw_mb = total_raw_bytes / 1024 / 1024
