@@ -80,6 +80,7 @@ GitHub Pages auto-gzips the base JSON; chunks are pre-gzipped and decompressed c
 - `crawl-amadeus.py` — crawl route data (needs AMADEUS_API_KEY/SECRET env vars)
 - `compute-ground-times.py` — original OSRM ground times script (superseded by crawler)
 - `osrm-crawler.py` — OSRM crawler with checkpoint/resume (crawl complete, 1201 airports)
+- `prioritize-crawl.py` — generates prioritized crawl order for remaining uncrawled airports
 - `check-crawler.sh` — quick pi crawler status check
 - `sanity-checks.py` — validate data
 
@@ -119,13 +120,21 @@ Cells crossing 180deg longitude are normalized by shifting negative longitudes t
 
 ## OSRM Ground Times (Integrated, Partial Coverage)
 
-1,201 airports crawled via OSRM demo server. 1.6M cells, 34 MB across 8 region files.
-Data integrated into precompute — 19,363 flight cells (16%) and 97 drive cells have OSRM ground times.
+1,201 airports crawled via OSRM demo server. ~1.5M cells after filtering, 34 MB across 8 region files.
+Data integrated into precompute — ~18k flight cells and 97 drive cells have OSRM ground times.
 Toggle in settings panel shows red/green OSRM coverage overlay.
+
+**OSRM snap filtering:** OSRM snaps ocean coordinates to nearest road, producing false drive
+times for water cells near islands. Two-stage filter in `load_osrm_ground_data()`:
+1. Hard speed cap (>130 km/h implied = physically impossible)
+2. Island detection via time-distance correlation (r<0.6 triggers adaptive distance filter)
+Strips ~82k snap artifacts + ~50k old haversine-fallback entries. See `scripts/ROUTING.md`
+for full details. Known limitation: near-shore cells within the island radius still pass
+the filter — a proper water mask would fix this but adds complexity.
 
 **Coverage gap:** only 1,132 of 3,139 reachable airports (36%) have OSRM data.
 The remaining 2,007 airports use haversine straight-line estimates for ground_from times.
-The OSRM demo server crawler has completed — this is all available data from that source.
+Prioritization script (`scripts/prioritize-crawl.py`) generates crawl order for remaining airports.
 
 **Smarter coverage plan options:**
 - Self-hosted OSRM instance (no rate limits, full global coverage, needs ~50GB RAM for planet file)
@@ -164,3 +173,5 @@ The OSRM demo server crawler has completed — this is all available data from t
 - Smoothness distribution test (p50/p90/p95, OSRM boundary, drive-fly boundary)
 - Discontinuity analysis tool (scripts/analyze-discontinuities.py)
 - All 3139 reachable airports shown on map
+- OSRM ocean snap artifact filter (speed cap + island correlation detection)
+- Crawler haversine fallback removed (skip instead of invent)
