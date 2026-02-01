@@ -184,6 +184,74 @@ MIN_FLY_DISTANCE = {
 }
 ```
 
+### OSRM coordinate snapping problem
+
+OSRM's table API snaps input coordinates to the nearest road segment before routing.
+for coordinates over land, the snap distance is negligible (<100m). for coordinates
+in the ocean near islands, the snap can be tens of km — OSRM silently routes from
+the snapped coastal road point instead of the actual cell center.
+
+**symptom:** island airports (bermuda, comoros, mallorca, etc.) show large blobs of
+colored cells extending far into the ocean. all cells receive plausible-looking drive
+times (6-66 minutes for bermuda) because OSRM is routing between points on the
+island's road network, not to the actual ocean locations.
+
+**detection:** two signals distinguish snapped ocean cells from legitimate land cells:
+
+1. **implied speed:** `straight_line_distance / osrm_time`. for real driving this is
+   30-100 km/h (roads wind). for snapped cells far from shore, the straight-line
+   distance is large but the time is short (routing from a closer snap point), giving
+   implied speeds >130 km/h — physically impossible on any road.
+
+2. **time-distance correlation:** for continental airports, drive time increases with
+   distance (pearson r > 0.7). for island airports with snap contamination, times
+   cluster in a narrow band regardless of distance (r < 0.5) because all cells snap
+   to the same small road network.
+
+**current filter** (in `precompute-isochrone.py` `load_osrm_ground_data()`):
+
+```
+stage 1: hard speed cap
+  implied speed > 130 km/h → remove (catches distant ocean cells)
+
+stage 2: island detection
+  compute pearson r(distance, time) for remaining cells
+  if r < 0.6:
+    find cells with "on-island" speeds (< 30 km/h)
+    island_radius = max distance of slow cells × 1.2
+    remove cells beyond island_radius
+```
+
+**results:** strips ~82k snap artifacts across 1,201 airports. bermuda: 1,519 → 108
+cells. continental airports (CDG, LHR, NRT) lose <0.1% of cells.
+
+**known limitations:**
+
+- near-shore ocean cells within the island radius still pass the filter. these have
+  small snap distances so their implied speeds are plausible. a proper land/water mask
+  (e.g., natural earth coastline data or OSM water polygons) would fix this but adds
+  a data dependency.
+
+- the 130 km/h hard cap may clip some german autobahn cells where sustained average
+  speed is genuinely >120 km/h. these cells would fall back to haversine estimation
+  or be covered by neighboring airports. not observed as a visual issue.
+
+- the r < 0.6 threshold catches ~131 airports including some coastal (not island)
+  airports like miami and vancouver. for these, the island_radius is large (100+ km)
+  so only far-offshore ocean cells are removed — correct behavior, not a false positive.
+
+- the slow-cell radius estimate (speed < 30 km/h) can be contaminated by near-shore
+  snapped cells. for very small islands this inflates the radius slightly. bermuda's
+  island_radius is 39km for a ~30km island — close but includes some reef area.
+
+**potential improvements:**
+
+- use OSRM's `waypoints[].distance` field (snap distance in meters) during crawl
+  to filter at crawl time rather than post-hoc. would require re-crawling.
+- integrate a coastline/water polygon dataset for definitive land/water classification
+- use satellite-derived land cover data (natural earth, modis) to mask water cells
+- re-crawl with a self-hosted OSRM instance that returns snap distance metadata
+
 ### todo
 
 - ~~run `compute-ground-times.py` for US/other regions~~ (done, all regions crawled)
