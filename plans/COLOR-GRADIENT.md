@@ -1,6 +1,20 @@
 # Color Gradient Design
 
-## Status: Not Yet Implemented
+## Status: Implemented (feat/color-gradient, 2026-07-03)
+
+Implementation deviations from the spec below:
+- **Oklab, not HSL**: the ramp interpolates in Oklab (perceptually uniform)
+  across multi-stop anchors pinned to the classic band palette, instead of a
+  two-endpoint HSL lerp — avoids the muddy mid-ramp the spec flagged, and
+  keeps the app's green→yellow→orange→red→purple identity.
+- **Bands kept as a toggle**: `TIME_BANDS` / `getTimeBandColor()` were NOT
+  removed. A "Smooth gradient" toggle (default on) switches between the
+  continuous ramp and the classic 10 bands — discrete bands read better at
+  globe zoom and stay available for a future Galton theme.
+- **Gamma slider range** is 1/3..3.0 on a symmetric log scale (center = 1.0),
+  vs the spec's ~0.2..3.0 — symmetry around linear beat the extra near-end
+  range.
+- **Persistence**: color mode + gamma persist in localStorage.
 
 ## Problem
 

@@ -269,6 +269,56 @@
       border-radius: 4px;
     }
 
+    /* continuous gradient legend (smooth color mode) */
+    #legend-gradient {
+      display: none;
+      width: 200px;
+    }
+    #legend-gradient.active { display: block; }
+    #legend-bands.hidden { display: none; }
+
+    .gradient-bar {
+      width: 100%;
+      height: 14px;
+      border-radius: 4px;
+      /* background set from JS so it always matches the live LUT */
+    }
+
+    .gradient-ticks {
+      position: relative;
+      height: 16px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: #aaa;
+    }
+
+    .gradient-tick {
+      position: absolute;
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+
+    /* color focus slider row extras */
+    .focus-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    .auto-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ccc;
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 2px 8px;
+      cursor: pointer;
+      margin-left: 8px;
+    }
+    .auto-btn:hover { background: rgba(255, 255, 255, 0.2); }
+
     /* Tooltip */
     .tooltip {
       position: absolute;
@@ -479,12 +529,34 @@
         </div>
         <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1">
       </div>
+      <div class="toggle-row">
+        <span>Smooth gradient</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-smooth" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="slider-row" id="color-focus-row">
+        <div class="slider-header">
+          <span>Color focus <button class="auto-btn" id="gamma-auto-btn" title="Fit color midpoint to median travel time">auto</button></span>
+          <span class="slider-value" id="color-focus-label">1.00</span>
+        </div>
+        <input type="range" id="color-focus" min="-1" max="1" step="0.05" value="0">
+        <div class="focus-labels"><span>near</span><span>far</span></div>
+      </div>
     </div>
   </div>
 
   <!-- Legend -->
   <div class="legend">
     <h3>Travel Time</h3>
+    <!-- continuous gradient bar (smooth color mode) -->
+    <div id="legend-gradient">
+      <div class="gradient-bar" id="gradient-bar"></div>
+      <div class="gradient-ticks" id="gradient-ticks"></div>
+    </div>
+    <!-- discrete band swatches (classic color mode) -->
+    <div id="legend-bands">
     <div class="legend-item"><div class="legend-color" style="background: #22c55e;"></div> < 2 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #84cc16;"></div> 2-4 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #eab308;"></div> 4-6 hours</div>
@@ -495,6 +567,7 @@
     <div class="legend-item"><div class="legend-color" style="background: #7c3aed;"></div> 14-18 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #4c1d95;"></div> 18-24 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #1e1b4b;"></div> 24+ hours</div>
+    </div>
   </div>
 
   <!-- Tooltip -->
@@ -848,7 +921,7 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
       // respect OSRM coverage toggle: green = OSRM, red = haversine
       const color = showOSRMCoverage
         ? (result.osrm ? '#22c55e' : '#ef4444')
-        : getTimeBandColor(result.totalMinutes);
+        : cellFillColor(result.totalMinutes);
       const boundary = h3.cellToBoundary(h3Index);
 
       // convert boundary to GeoJSON coordinates [lng, lat]
@@ -1075,6 +1148,143 @@ const TIME_BANDS = [
 let colorScale = 1.0;
 
 // =============================================================================
+// CONTINUOUS COLOR GRADIENT (see plans/COLOR-GRADIENT.md)
+// Smooth Oklab-interpolated ramp over the classic band palette, plus a gamma
+// "color focus" warp: t = (hours / 24)^gamma. gamma<1 spreads color resolution
+// over short trips; gamma>1 spreads it over long trips.
+// =============================================================================
+
+// color mode: 'smooth' (continuous ramp, default) | 'bands' (classic 10 bands)
+let colorMode = 'smooth';
+// gamma for the color-focus warp (1.0 = linear, same spread as classic bands)
+let colorGamma = 1.0;
+// slider maps [-1, 1] -> gamma [1/GAMMA_RANGE, GAMMA_RANGE] on a log scale
+const GAMMA_RANGE = 3.0;
+// full ramp spans 0..24h (matches the classic band ceiling); scaled by colorScale
+const RAMP_MAX_HOURS = 24;
+
+// restore persisted color prefs (ignore errors: private mode etc.)
+try {
+  const savedMode = localStorage.getItem('jetspan-color-mode');
+  if (savedMode === 'bands' || savedMode === 'smooth') colorMode = savedMode;
+  const savedGamma = parseFloat(localStorage.getItem('jetspan-color-gamma'));
+  if (savedGamma >= 1 / GAMMA_RANGE && savedGamma <= GAMMA_RANGE) colorGamma = savedGamma;
+} catch (e) { /* localStorage unavailable — defaults are fine */ }
+
+// --- Oklab conversion (perceptually uniform interpolation; raw HSL goes muddy
+// mid-ramp). Reference: Björn Ottosson, https://bottosson.github.io/posts/oklab/
+function hexToRgb(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ];
+}
+
+function srgbToLinear(c) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(c) {
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}
+
+function rgbToOklab([r, g, b]) {
+  const lr = srgbToLinear(r), lg = srgbToLinear(g), lb = srgbToLinear(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [
+    0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+  ];
+}
+
+function oklabToHex([L, a, bb]) {
+  const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * bb, 3);
+  const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * bb, 3);
+  const s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * bb, 3);
+  const lr = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const lb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+  const toByte = (c) => {
+    const v = Math.round(Math.min(1, Math.max(0, linearToSrgb(c))) * 255);
+    return v.toString(16).padStart(2, '0');
+  };
+  return '#' + toByte(lr) + toByte(lg) + toByte(lb);
+}
+
+// ramp anchors: the classic band palette pinned at each band's midpoint
+// (as a fraction of the 24h span), so the smooth ramp keeps the app's
+// green -> yellow -> orange -> red -> purple identity, just without seams.
+const GRADIENT_STOPS = [
+  [0.000, '#22c55e'], // green        (0h)
+  [0.083, '#84cc16'], // lime         (~2h)
+  [0.167, '#eab308'], // yellow       (~4h)
+  [0.250, '#f97316'], // orange       (~6h)
+  [0.333, '#ef4444'], // red          (~8h)
+  [0.458, '#dc2626'], // dark red     (~11h)
+  [0.542, '#a855f7'], // purple       (~13h)
+  [0.667, '#7c3aed'], // violet       (~16h)
+  [0.875, '#4c1d95'], // deep purple  (~21h)
+  [1.000, '#1e1b4b'], // near-black   (24h+)
+];
+
+// 256-entry LUT so recolorGrid stays a cheap array lookup per cell
+const GRADIENT_LUT = (() => {
+  const labStops = GRADIENT_STOPS.map(([pos, hex]) => [pos, rgbToOklab(hexToRgb(hex))]);
+  const lut = new Array(256);
+  let seg = 0;
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    while (seg < labStops.length - 2 && t > labStops[seg + 1][0]) seg++;
+    const [p0, lab0] = labStops[seg];
+    const [p1, lab1] = labStops[seg + 1];
+    const f = p1 > p0 ? Math.min(1, Math.max(0, (t - p0) / (p1 - p0))) : 0;
+    lut[i] = oklabToHex([
+      lab0[0] + (lab1[0] - lab0[0]) * f,
+      lab0[1] + (lab1[1] - lab0[1]) * f,
+      lab0[2] + (lab1[2] - lab0[2]) * f,
+    ]);
+  }
+  return lut;
+})();
+
+// continuous color: minutes -> gamma-warped position on the ramp
+function getTimeColor(totalMinutes) {
+  const hours = totalMinutes / 60;
+  let t = Math.min(Math.max(hours / (RAMP_MAX_HOURS * colorScale), 0), 1);
+  t = Math.pow(t, colorGamma);
+  return GRADIENT_LUT[Math.round(t * 255)];
+}
+
+// single entry point for cell fill color — dispatches on color mode
+function cellFillColor(totalMinutes) {
+  return colorMode === 'smooth' ? getTimeColor(totalMinutes) : getTimeBandColor(totalMinutes);
+}
+
+// slider position [-1,1] <-> gamma, log scale, center = 1.0
+function sliderToGamma(v) { return Math.pow(GAMMA_RANGE, v); }
+function gammaToSlider(g) { return Math.log(g) / Math.log(GAMMA_RANGE); }
+
+// auto-fit: pick gamma so the median visible travel time lands at the ramp's
+// visual midpoint (t = 0.5). gamma = ln(0.5) / ln(median_hours / 24)
+function autoFitGamma() {
+  if (!gridData || !gridData.features.length) return null;
+  const times = gridData.features
+    .map(f => f.properties.travelTimeMinutes)
+    .filter(m => Number.isFinite(m) && m > 0)
+    .sort((a, b) => a - b);
+  if (!times.length) return null;
+  const medianHours = times[Math.floor(times.length / 2)] / 60;
+  const ratio = medianHours / (RAMP_MAX_HOURS * colorScale);
+  if (ratio <= 0 || ratio >= 1) return null; // degenerate — keep current gamma
+  const g = Math.log(0.5) / Math.log(ratio);
+  return Math.min(GAMMA_RANGE, Math.max(1 / GAMMA_RANGE, g));
+}
+
+// =============================================================================
 // UTILITIES
 // =============================================================================
 
@@ -1132,14 +1342,65 @@ function recolorGrid() {
       // red/green by OSRM coverage: green = OSRM used, red = haversine estimate
       f.properties.color = f.properties.osrm ? '#22c55e' : '#ef4444';
     } else {
-      f.properties.color = getTimeBandColor(f.properties.travelTimeMinutes);
+      f.properties.color = cellFillColor(f.properties.travelTimeMinutes);
     }
   }
   map.getSource('hexgrid').setData(gridData);
 }
 
-// update legend labels to reflect current color scale
+// update legend to reflect current color mode, scale, and gamma
 function updateLegend() {
+  const gradientLegend = document.getElementById('legend-gradient');
+  const bandLegend = document.getElementById('legend-bands');
+  if (colorMode === 'smooth') {
+    gradientLegend.classList.add('active');
+    bandLegend.classList.add('hidden');
+    updateGradientLegend();
+  } else {
+    gradientLegend.classList.remove('active');
+    bandLegend.classList.remove('hidden');
+    updateBandLegend();
+  }
+}
+
+// continuous legend: gradient bar sampled from the live LUT + hour ticks
+// positioned by the same gamma warp the cells use (ticks shift with gamma)
+function updateGradientLegend() {
+  const bar = document.getElementById('gradient-bar');
+  // sample the LUT into a CSS gradient (17 stops is visually indistinguishable
+  // from 256 at 200px wide)
+  const stops = [];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    stops.push(GRADIENT_LUT[Math.round(t * 255)] + ' ' + (t * 100).toFixed(1) + '%');
+  }
+  bar.style.background = 'linear-gradient(to right, ' + stops.join(', ') + ')';
+
+  // ticks: hours -> position via the gamma warp; drop ticks that would collide
+  const ticksEl = document.getElementById('gradient-ticks');
+  const maxH = RAMP_MAX_HOURS * colorScale;
+  const candidates = [0, 1, 2, 4, 6, 8, 12, 16, 24].map(h => h * colorScale)
+    .filter(h => h <= maxH);
+  const MIN_SPACING = 0.10; // 10% of bar width between tick centers
+  let lastPos = -1;
+  let html = '';
+  for (const h of candidates) {
+    const pos = Math.pow(h / maxH, colorGamma);
+    const isLast = h === maxH;
+    if (!isLast && pos - lastPos < MIN_SPACING) continue;
+    if (isLast && pos - lastPos < MIN_SPACING && html) {
+      // drop the previous tick instead of the endpoint label
+      html = html.slice(0, html.lastIndexOf('<div'));
+    }
+    html += '<div class="gradient-tick" style="left:' + (pos * 100).toFixed(1) + '%">'
+      + formatBandHours(h) + (isLast ? '+' : '') + '</div>';
+    lastPos = pos;
+  }
+  ticksEl.innerHTML = html;
+}
+
+// classic legend: band labels scaled by colorScale
+function updateBandLegend() {
   const items = document.querySelectorAll('.legend-item');
   TIME_BANDS.forEach((band, i) => {
     if (!items[i]) return;
@@ -1992,6 +2253,34 @@ async function runTests() {
   colorScale = origScale; // restore
   assert(c1 !== c2, 'color scale shifts bands (2× → ' + c1 + ', 0.5× → ' + c2 + ')');
 
+  // continuous gradient (smooth mode)
+  for (const mins of colorTests) {
+    const color = getTimeColor(mins);
+    assert(color && color.startsWith('#') && color.length === 7,
+      'smooth ' + mins + 'min → ' + color);
+  }
+  // nearby times get distinct colors (no 2h plateaus like the discrete bands)
+  assert(getTimeColor(150) !== getTimeColor(210),
+    'smooth ramp distinguishes 2.5h from 3.5h');
+  // endpoints anchor to the classic palette
+  assert(getTimeColor(0) === '#22c55e', 'smooth ramp starts at band green');
+  assert(getTimeColor(24 * 60 * colorScale) === '#1e1b4b', 'smooth ramp ends at band deep purple');
+  // gamma warps the mapping
+  const origGamma = colorGamma;
+  colorGamma = 0.4;
+  const gNear = getTimeColor(300);
+  colorGamma = 2.5;
+  const gFar = getTimeColor(300);
+  colorGamma = origGamma; // restore
+  assert(gNear !== gFar, 'gamma shifts colors (0.4 → ' + gNear + ', 2.5 → ' + gFar + ')');
+  // dispatcher follows color mode
+  const origMode = colorMode;
+  colorMode = 'smooth';
+  assert(cellFillColor(300) === getTimeColor(300), 'cellFillColor dispatches to smooth');
+  colorMode = 'bands';
+  assert(cellFillColor(300) === getTimeBandColor(300), 'cellFillColor dispatches to bands');
+  colorMode = origMode; // restore
+
   // === 9. KNOWN ROUTES ===
   show('\n─── 9. Known Route Sanity ───');
   const knownRoutes = [
@@ -2459,6 +2748,48 @@ document.getElementById('color-scale').addEventListener('input', (e) => {
   recolorGrid();
   updateLegend();
 });
+
+// smooth gradient toggle: switch between continuous ramp and classic bands
+document.getElementById('toggle-smooth').addEventListener('change', (e) => {
+  colorMode = e.target.checked ? 'smooth' : 'bands';
+  try { localStorage.setItem('jetspan-color-mode', colorMode); } catch (err) {}
+  document.getElementById('color-focus-row').style.display =
+    colorMode === 'smooth' ? '' : 'none';
+  recolorGrid();
+  updateLegend();
+});
+
+// color focus slider: gamma warp (near <-> far), log scale, center = linear
+document.getElementById('color-focus').addEventListener('input', (e) => {
+  colorGamma = sliderToGamma(parseFloat(e.target.value));
+  try { localStorage.setItem('jetspan-color-gamma', colorGamma); } catch (err) {}
+  document.getElementById('color-focus-label').textContent = colorGamma.toFixed(2);
+  recolorGrid();
+  updateLegend();
+});
+
+// auto-fit button: set gamma so the median travel time hits the ramp midpoint
+document.getElementById('gamma-auto-btn').addEventListener('click', () => {
+  const g = autoFitGamma();
+  if (g === null) return;
+  colorGamma = g;
+  try { localStorage.setItem('jetspan-color-gamma', colorGamma); } catch (err) {}
+  document.getElementById('color-focus').value = gammaToSlider(g).toFixed(2);
+  document.getElementById('color-focus-label').textContent = colorGamma.toFixed(2);
+  recolorGrid();
+  updateLegend();
+});
+
+// sync color controls to (possibly localStorage-restored) state at startup
+function syncColorControls() {
+  document.getElementById('toggle-smooth').checked = colorMode === 'smooth';
+  document.getElementById('color-focus-row').style.display =
+    colorMode === 'smooth' ? '' : 'none';
+  document.getElementById('color-focus').value = gammaToSlider(colorGamma).toFixed(2);
+  document.getElementById('color-focus-label').textContent = colorGamma.toFixed(2);
+  updateLegend();
+}
+syncColorControls();
 
 // Initialize
 initMap();
