@@ -1,0 +1,83 @@
+{
+  "kind": "interaction-bench",
+  "timestamp": "2026-07-03T15:55:52.475Z",
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.0 Safari/537.36",
+  "devicePixelRatio": 1,
+  "viewport": {
+    "w": 1280,
+    "h": 800
+  },
+  "postMs": 1400,
+  "results": [
+    {
+      "frames": 3,
+      "durationMs": 1583,
+      "fps": 1.9,
+      "avgFrameMs": 527.77,
+      "medianFrameMs": 500,
+      "p95FrameMs": 700,
+      "maxFrameMs": 700,
+      "jankPct": 100,
+      "longTasks": 5,
+      "longTaskTotalMs": 1491,
+      "scenario": "pan-continuous-z4"
+    },
+    {
+      "frames": 7,
+      "durationMs": 4516,
+      "fps": 1.5,
+      "avgFrameMs": 645.2,
+      "medianFrameMs": 516.7,
+      "p95FrameMs": 1166.5,
+      "maxFrameMs": 1166.5,
+      "jankPct": 100,
+      "longTasks": 10,
+      "longTaskTotalMs": 5271,
+      "scenario": "pan-continuous-z6"
+    },
+    {
+      "frames": 15,
+      "durationMs": 6883,
+      "fps": 2.2,
+      "avgFrameMs": 458.87,
+      "medianFrameMs": 400,
+      "p95FrameMs": 983.4,
+      "maxFrameMs": 983.4,
+      "jankPct": 100,
+      "longTasks": 16,
+      "longTaskTotalMs": 5851,
+      "scenario": "zoom-in-out"
+    },
+    {
+      "frames": 9,
+      "durationMs": 10900,
+      "fps": 0.8,
+      "avgFrameMs": 1211.06,
+      "medianFrameMs": 850,
+      "p95FrameMs": 4883.2,
+      "maxFrameMs": 4883.2,
+      "jankPct": 100,
+      "longTasks": 11,
+      "longTaskTotalMs": 13324,
+      "scenario": "rotate-globe"
+    },
+    {
+      "frames": 13,
+      "durationMs": 5050,
+      "fps": 2.6,
+      "avgFrameMs": 388.45,
+      "medianFrameMs": 250,
+      "p95FrameMs": 2149.9,
+      "maxFrameMs": 2149.9,
+      "jankPct": 100,
+      "longTasks": 14,
+      "longTaskTotalMs": 3313,
+      "scenario": "bearing-spin-z5"
+    },
+    {
+      "scenario": "pin-interaction",
+      "skipped": true
+    }
+  ],
+  "machine": "raspberrypi"
+}
