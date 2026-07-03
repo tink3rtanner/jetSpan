@@ -1329,16 +1329,21 @@ const AIRPORTS = [
 ];
 
 // =============================================================================
-// THEMES — three complete looks: vintage (default), modern, dark
-// Each theme = basemap style + 10 band colors + map paint + UI skin (CSS class)
+// THEMES — three structurally different RENDERINGS of the isochrone, not
+// three recolors of the same hex map:
+//   vintage -> 'contours' : engraved isolines + crosshatch hachure (no hex fills)
+//   modern  -> 'field'    : continuous heatmap field from hex centroids (no edges)
+//   dark    -> 'relief'   : 3D fill-extrusion columns, pitched camera
+// Each theme = representation + basemap + band colors + paint + UI skin.
 // =============================================================================
 const THEMES = {
   // Antique cartography after Galton's 1881 Isochronic Passage Chart:
-  // parchment base (sepia CSS filter on canvas), muted watercolor washes in
-  // Galton's own hue sequence (green -> yellow -> rose -> slate blue -> umber),
-  // engraved serif UI chrome.
+  // parchment base (sepia CSS filter on canvas), but rendered as an ENGRAVING —
+  // dissolved isoline contour rings between time bands, crosshatched hachure
+  // shading that stacks darker toward the origin, and a lat/long graticule.
   vintage: {
     label: 'Vintage',
+    representation: 'contours',
     basemap: 'https://tiles.openfreemap.org/styles/bright',
     bodyClass: 'theme-vintage',
     legendTitle: 'Explanation of Colours',
@@ -1359,20 +1364,23 @@ const THEMES = {
       '#5c3d20', // 24h+    dark umber
     ],
     paint: {
-      // watercolor washes: present enough to read, thin enough for paper to show
+      // fillOpacity kept for API compat (invisible hit-layer uses ~0)
       fillOpacity: [0, 0.75, 360, 0.68, 600, 0.58, 840, 0.48, 1200, 0.38],
       airportColor: '#3f3020', airportStroke: '#f0e6cf',
       labelColor: '#2e2417', labelHalo: '#f0e6cf',
       originColor: '#8b3a2f', originStroke: '#f5eedd',
       borderColor: 'rgba(92, 70, 48, 0.55)',
       routeColor: '#3a2f22',
+      ink: '#3a2c1a',           // engraving ink for contours + hachure + graticule
     },
   },
-  // Clean contemporary light: minimal gray basemap, smooth teal->indigo
-  // perceptual ramp, crisp sans chrome.
+  // Clean contemporary light: the hexes DISSOLVE into a continuous heatmap
+  // FIELD — soft gradient blobs from hex centroids weighted by nearness,
+  // zero hard edges. Minimal positron basemap, crisp sans chrome.
   modern: {
     label: 'Modern',
-    continuous: true, // smooth gradient fills instead of hard band steps
+    representation: 'field',
+    continuous: true, // smooth gradient (used by legend/tooltip color lookups)
     basemap: 'https://tiles.openfreemap.org/styles/positron',
     bodyClass: 'theme-modern',
     legendTitle: 'Travel Time',
@@ -1399,9 +1407,15 @@ const THEMES = {
       routeColor: '#1e293b',
     },
   },
-  // Night / data-viz: dark basemap, the original luminous rainbow bands.
+  // Night / data-viz RELIEF: 3D fill-extrusion columns on a dark basemap —
+  // nearer = taller (a reachability mountain centered on the origin), luminous
+  // band colors, glowing edge underlay, pitched camera. Flat (mercator)
+  // projection: fill-extrusion renders unreliably on the globe.
   dark: {
     label: 'Dark',
+    representation: 'relief',
+    projection: 'mercator',  // extrusions + globe don't mix well in maplibre v5
+    pitch: 55,
     basemap: 'https://tiles.openfreemap.org/styles/dark',
     bodyClass: 'theme-dark',
     legendTitle: 'Travel Time',
@@ -1477,10 +1491,24 @@ function applyThemeChrome(name) {
   // recolor the band table in place (getTimeBandColor reads from it)
   TIME_BANDS.forEach((band, i) => { band.color = theme.bandColors[i]; });
 
-  // legend swatches + title
+  // legend swatches + title — engraved mode shows hachure density, not color
+  // (the plate is monochrome ink; colored chips would lie)
   const swatches = document.querySelectorAll('.legend-color');
+  const engraved = theme.representation === 'contours';
   TIME_BANDS.forEach((band, i) => {
-    if (swatches[i]) swatches[i].style.background = band.color;
+    if (!swatches[i]) return;
+    if (engraved) {
+      const ink = theme.paint.ink || '#3a2c1a';
+      const gap = 2.5 + i * 0.9; // nearer bands = denser strokes
+      let bg = `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px ${gap}px)`;
+      if (i < 4) bg += `, repeating-linear-gradient(135deg, ${ink} 0 1px, transparent 1px ${gap + 1.5}px)`;
+      swatches[i].style.background = bg;
+      swatches[i].style.backgroundColor = '#f3ead4';
+      swatches[i].style.border = `1px solid ${ink}`;
+    } else {
+      swatches[i].style.background = band.color;
+      swatches[i].style.border = '';
+    }
   });
   const legendTitle = document.querySelector('.legend h3');
   if (legendTitle) legendTitle.textContent = theme.legendTitle;
@@ -1512,11 +1540,16 @@ function applyTheme(name) {
       }
     }
     // setStyle wipes our sources/layers; re-add them once the new style loads.
-    // (the global 'style.load' handler re-enables globe projection)
-    map.setStyle(theme.basemap);
+    // diff:false forces a FULL style reload so 'style.load' is guaranteed to
+    // fire — the diff path can silently skip it, stranding the map with no
+    // app layers (bit us during rapid theme cycling).
+    // (the global 'style.load' handler applies the theme's projection)
+    map.setStyle(theme.basemap, { diff: false });
     map.once('style.load', () => {
       addAppSourcesAndLayers();
     });
+    // camera: relief wants a pitched view; the flat representations want 0
+    map.easeTo({ pitch: theme.pitch || 0, duration: 800 });
   }
 }
 
@@ -1599,6 +1632,7 @@ function recolorGrid() {
     }
   }
   map.getSource('hexgrid').setData(gridData);
+  refreshGridDerived(); // colorScale moves band thresholds + field weights
 }
 
 // update legend labels to reflect current color scale
@@ -1640,6 +1674,156 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
 }
 
 // =============================================================================
+// REPRESENTATION ENGINE — derived geometries for the non-hex renderings
+// =============================================================================
+// contours: dissolve cumulative time-band hex sets into isoline rings (h3)
+// field:    hex centroids as weighted points for a heatmap layer
+// graticule: static 10-degree lat/long grid for the engraved look
+
+// band index for a travel time under the current colorScale (0..9)
+function getBandIndex(totalMinutes) {
+  const hours = totalMinutes / 60;
+  for (let i = 0; i < TIME_BANDS.length; i++) {
+    if (hours < TIME_BANDS[i].maxHours * colorScale) return i;
+  }
+  return TIME_BANDS.length - 1;
+}
+
+// Dissolve hexes into nested contour regions: feature i = the region reachable
+// within band i's upper threshold (cumulative), as a MultiPolygon. The
+// polygon OUTLINES are the isolines; the stacked regions drive hachure shading
+// (near-origin cells sit under many stacked regions -> denser crosshatch).
+function buildContourGeoJSON() {
+  const empty = { type: 'FeatureCollection', features: [] };
+  if (!gridData || !gridData.features.length) return empty;
+
+  // bucket h3 indexes by band
+  const buckets = TIME_BANDS.map(() => []);
+  for (const f of gridData.features) {
+    buckets[getBandIndex(f.properties.travelTimeMinutes)].push(f.properties.h3Index);
+  }
+
+  const features = [];
+  let cumulative = [];
+  // skip the last (Infinity) band — its "contour" is just the data footprint
+  for (let i = 0; i < TIME_BANDS.length - 1; i++) {
+    cumulative = cumulative.concat(buckets[i]);
+    if (!cumulative.length) continue;
+    try {
+      // h3 v4: cellsToMultiPolygon(cells, formatAsGeoJson) -> [lng,lat] loops
+      let mp = h3.cellsToMultiPolygon(cumulative, true);
+      if (!mp || !mp.length) continue;
+      // de-noise: drop tiny island polygons (outer ring < ~4 hexes) and tiny
+      // holes — single-hex specks turn the plate into worm pox otherwise
+      mp = mp
+        .filter(poly => poly[0] && poly[0].length >= 50)
+        .map(poly => poly.filter((ring, ri) => ri === 0 || ring.length >= 50));
+      if (!mp.length) continue;
+      features.push({
+        type: 'Feature',
+        properties: {
+          band: i,
+          maxHours: TIME_BANDS[i].maxHours * colorScale,
+          major: i % 2 === 1, // every other isoline drawn heavier
+        },
+        geometry: { type: 'MultiPolygon', coordinates: mp },
+      });
+    } catch (e) { /* dissolve can fail on mixed-res sets; skip band */ }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+// Hex centroids as weighted points: weight = nearness (1 at the origin,
+// 0 at >= 24h scaled), slightly curved so the near field stays hot.
+function buildCentroidGeoJSON() {
+  const empty = { type: 'FeatureCollection', features: [] };
+  if (!gridData || !gridData.features.length) return empty;
+  const horizon = 1440 * colorScale; // minutes at which the field fades out
+  const features = [];
+  for (const f of gridData.features) {
+    const t = f.properties.travelTimeMinutes;
+    const w = Math.pow(Math.max(0, 1 - t / horizon), 2.2);
+    if (w <= 0.005) continue; // drop dead weight, keeps the heatmap cheap
+    features.push({
+      type: 'Feature',
+      properties: { w },
+      geometry: { type: 'Point', coordinates: f.properties.centroid },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+// static 10-degree graticule (verticals sampled every 2 deg for globe curvature)
+let _graticuleCache = null;
+function buildGraticuleGeoJSON() {
+  if (_graticuleCache) return _graticuleCache;
+  const features = [];
+  for (let lat = -80; lat <= 80; lat += 10) {
+    const coords = [];
+    for (let lng = -180; lng <= 180; lng += 2) coords.push([lng, lat]);
+    features.push({ type: 'Feature', properties: { major: lat % 30 === 0 },
+      geometry: { type: 'LineString', coordinates: coords } });
+  }
+  for (let lng = -180; lng < 180; lng += 10) {
+    const coords = [];
+    for (let lat = -80; lat <= 80; lat += 2) coords.push([lng, lat]);
+    features.push({ type: 'Feature', properties: { major: lng % 30 === 0 },
+      geometry: { type: 'LineString', coordinates: coords } });
+  }
+  _graticuleCache = { type: 'FeatureCollection', features };
+  return _graticuleCache;
+}
+
+// seamless 64px hachure tiles at 0/45/90/135 deg — the four classic engraving
+// stroke directions. Stacked cumulative regions cycle through them, so overlap
+// near the origin reads as progressively denser crosshatch.
+const HACHURE_ANGLES = [45, 135, 0, 90];
+function makeHachureTile(angle, ink) {
+  const S = 64, SPACING = 8;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, S, S);
+  ctx.strokeStyle = ink;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (angle === 0) {          // horizontal
+    for (let y = SPACING / 2; y < S; y += SPACING) { ctx.moveTo(0, y); ctx.lineTo(S, y); }
+  } else if (angle === 90) {  // vertical
+    for (let x = SPACING / 2; x < S; x += SPACING) { ctx.moveTo(x, 0); ctx.lineTo(x, S); }
+  } else if (angle === 45) {  // diagonals (drawn over-range so the tile wraps)
+    for (let d = -S; d < 2 * S; d += SPACING) { ctx.moveTo(d, 0); ctx.lineTo(d + S, S); }
+  } else {                    // 135
+    for (let d = 0; d < 3 * S; d += SPACING) { ctx.moveTo(d, 0); ctx.lineTo(d - S, S); }
+  }
+  ctx.stroke();
+  return ctx.getImageData(0, 0, S, S);
+}
+
+// (re)register hachure pattern images — setStyle wipes images, so this runs
+// inside addAppSourcesAndLayers on every style load
+function ensureHachureImages(ink) {
+  for (const a of HACHURE_ANGLES) {
+    const id = 'hachure-' + a;
+    if (!map.hasImage(id)) map.addImage(id, makeHachureTile(a, ink));
+  }
+}
+
+// push fresh derived geometry into whichever representation is live.
+// call after ANY gridData change (zoom-res switch, origin change, recolor).
+function refreshGridDerived() {
+  if (!map) return;
+  const rep = THEMES[currentTheme].representation;
+  if (rep === 'contours' && map.getSource('contours')) {
+    map.getSource('contours').setData(buildContourGeoJSON());
+  } else if (rep === 'field' && map.getSource('hex-centroids')) {
+    map.getSource('hex-centroids').setData(buildCentroidGeoJSON());
+  }
+  // relief renders straight from the hexgrid source — nothing derived
+}
+
+// =============================================================================
 // MAP INITIALIZATION
 // =============================================================================
 
@@ -1674,11 +1858,13 @@ async function initMap() {
     style: THEMES[currentTheme].basemap,
     center: ORIGINS[currentOrigin].coordinates,
     zoom: 2,
+    pitch: THEMES[currentTheme].pitch || 0,
   });
 
-  // Enable globe projection after style loads (MapLibre v5+)
+  // Projection is per-theme: globe by default, but the relief theme uses
+  // mercator (fill-extrusion + globe is unreliable in MapLibre v5).
   map.on('style.load', () => {
-    map.setProjection({ type: 'globe' });
+    map.setProjection({ type: THEMES[currentTheme].projection || 'globe' });
   });
 
   map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
@@ -1764,6 +1950,10 @@ function tuneBasemapForTheme() {
           map.setPaintProperty(layer.id, 'text-halo-color', 'rgba(243, 234, 212, 0.8)');
         } else if (layer.type === 'fill' && /water|ocean/.test(layer.id)) {
           map.setPaintProperty(layer.id, 'fill-color', '#ccdad2'); // pale duck-egg sea
+        } else if (layer.type === 'fill' &&
+                   /landcover|landuse|park|grass|wood|forest|glacier|sand/.test(layer.id)) {
+          // engraving is ink-on-paper: kill the green landcover tints
+          map.setPaintProperty(layer.id, 'fill-opacity', 0);
         }
       } else if (currentTheme === 'dark') {
         if (layer.type === 'symbol') {
@@ -1776,15 +1966,34 @@ function tuneBasemapForTheme() {
 }
 
 function addAppSourcesAndLayers() {
-  const T = THEMES[currentTheme].paint;
+  const theme = THEMES[currentTheme];
+  const T = theme.paint;
+  const rep = theme.representation || 'hex';
+  const EMPTY = { type: 'FeatureCollection', features: [] };
+  // idempotent addLayer: rapid theme switches can stack style.load handlers,
+  // and the second pass must not throw on duplicate layer ids
+  const addLayerOnce = (def, before) => {
+    if (!map.getLayer(def.id)) map.addLayer(def, before);
+  };
   tuneBasemapForTheme();
 
   // Sources (hexgrid restores cached grid data instantly on theme switch)
   if (!map.getSource('hexgrid')) {
     map.addSource('hexgrid', {
       type: 'geojson',
-      data: gridData || { type: 'FeatureCollection', features: [] },
+      data: gridData || EMPTY,
     });
+  }
+  // derived sources for the non-hex representations (filled by
+  // refreshGridDerived at the bottom of this function)
+  if (!map.getSource('contours')) {
+    map.addSource('contours', { type: 'geojson', data: EMPTY });
+  }
+  if (!map.getSource('hex-centroids')) {
+    map.addSource('hex-centroids', { type: 'geojson', data: EMPTY });
+  }
+  if (!map.getSource('graticule')) {
+    map.addSource('graticule', { type: 'geojson', data: buildGraticuleGeoJSON() });
   }
   if (!map.getSource('airports')) {
     map.addSource('airports', { type: 'geojson', data: generateAirportGeoJSON() });
@@ -1795,54 +2004,195 @@ function addAppSourcesAndLayers() {
   if (!map.getSource('route-line')) {
     map.addSource('route-line', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
+      data: EMPTY
     });
   }
 
-  // Add layers - order matters! Hex grid first, then airports on top
-  map.addLayer({
-    id: 'hexgrid-fill',
-    type: 'fill',
-    source: 'hexgrid',
-    paint: {
-      'fill-color': ['get', 'color'],
-      // Fade out very long travel times (mostly ocean/remote)
-      'fill-opacity': [
-        'interpolate', ['linear'],
-        ['get', 'travelTimeMinutes'],
-        T.fillOpacity[0], T.fillOpacity[1],
-        T.fillOpacity[2], T.fillOpacity[3],
-        T.fillOpacity[4], T.fillOpacity[5],
-        T.fillOpacity[6], T.fillOpacity[7],
-        T.fillOpacity[8], T.fillOpacity[9],
-      ],
-    }
-  });
+  // ---------------------------------------------------------------------
+  // GRID RENDERING — three structurally different representations.
+  // Every branch ends with an interactive layer whose id is 'hexgrid-fill'
+  // so the hover/tooltip delegation and the grid toggle keep working.
+  // ---------------------------------------------------------------------
+  if (rep === 'contours') {
+    // ENGRAVED: graticule under everything, stacked hachure washes for
+    // shading (cumulative regions overlap -> denser crosshatch near origin),
+    // ink isolines on the dissolved band boundaries. NO colored hex fills.
+    ensureHachureImages(T.ink);
 
-  map.addLayer({
-    id: 'hexgrid-line',
-    type: 'line',
-    source: 'hexgrid',
-    paint: {
-      'line-color': ['get', 'color'],
-      'line-width': [
-        'interpolate', ['linear'], ['zoom'],
-        0, 0,      // No lines when zoomed out
-        3, 0,      // Still no lines
-        5, 0.3,    // Thin lines at medium zoom
-        8, 0.5     // Slightly thicker when zoomed in
-      ],
-      'line-opacity': [
-        'interpolate', ['linear'], ['zoom'],
-        0, 0,
-        3, 0,
-        5, 0.1,
-        8, 0.15
-      ],
-    }
-  });
+    addLayerOnce({
+      id: 'graticule',
+      type: 'line',
+      source: 'graticule',
+      paint: {
+        'line-color': T.ink,
+        'line-width': ['case', ['get', 'major'], 0.7, 0.4],
+        'line-opacity': 0.35,
+        'line-dasharray': [1, 2],
+      }
+    });
 
-  map.addLayer({
+    // one hachure layer per contour region, cycling stroke direction —
+    // regions are cumulative so overlap builds an engraver's crosshatch
+    for (let b = 0; b < TIME_BANDS.length - 1; b++) {
+      addLayerOnce({
+        id: 'hachure-band-' + b,
+        type: 'fill',
+        source: 'contours',
+        filter: ['==', ['get', 'band'], b],
+        paint: {
+          'fill-pattern': 'hachure-' + HACHURE_ANGLES[b % HACHURE_ANGLES.length],
+          'fill-opacity': 0.45,
+        }
+      });
+    }
+
+    addLayerOnce({
+      id: 'contour-lines',
+      type: 'line',
+      source: 'contours',
+      paint: {
+        'line-color': T.ink,
+        'line-width': ['case', ['get', 'major'], 1.6, 0.8],
+        'line-opacity': 0.9,
+      }
+    });
+
+    // invisible hit-layer: hover/tooltip still works per-hex
+    addLayerOnce({
+      id: 'hexgrid-fill',
+      type: 'fill',
+      source: 'hexgrid',
+      paint: { 'fill-color': '#000000', 'fill-opacity': 0 }
+    });
+
+  } else if (rep === 'field') {
+    // FIELD: continuous heatmap from hex centroids weighted by nearness —
+    // soft gradient blobs, zero polygon edges. Radius saw-tooths with zoom
+    // to track the res switches (res jumps ~2.6x finer at z1/z2/z4.5/z6.5).
+    addLayerOnce({
+      id: 'field-heat',
+      type: 'heatmap',
+      source: 'hex-centroids',
+      paint: {
+        'heatmap-weight': ['get', 'w'],
+        // intensity is LOW on purpose: with a dense uniform point grid the
+        // kernel sums ~8-10 overlapping points, so ~0.12 lands the near-origin
+        // density at ~1.0 and the far field in the fade zone
+        'heatmap-intensity': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 1.15, 2, 0.75, 4, 0.45, 7, 0.55
+        ],
+        // radius ~2.5-4x point spacing, saw-toothing at each res switch
+        'heatmap-radius': [
+          'interpolate', ['exponential', 2], ['zoom'],
+          0, 10,
+          0.9, 18,   1.0, 8,    // res 1 -> 2
+          1.9, 15,   2.0, 6,    // res 2 -> 4
+          4.4, 32,   4.5, 13,   // res 4 -> 5
+          6.4, 56,   6.5, 20,   // res 5 -> 6
+          9, 120
+        ],
+        // INVERTED ramp: hot core (near origin, high density) = pale teal,
+        // fading through blue/indigo to transparent at the far fringe —
+        // matches the legend (teal = fast, indigo = slow)
+        'heatmap-color': [
+          'interpolate', ['linear'], ['heatmap-density'],
+          0.00, 'rgba(49, 46, 129, 0)',
+          0.06, 'rgba(79, 70, 229, 0.30)',
+          0.18, '#4f46e5',
+          0.38, '#0284c7',
+          0.62, '#14b8a6',
+          0.85, '#5eead4',
+          1.00, '#ccfbf1'
+        ],
+        'heatmap-opacity': 0.80,
+      }
+    });
+
+    // invisible hit-layer for hover/tooltip
+    addLayerOnce({
+      id: 'hexgrid-fill',
+      type: 'fill',
+      source: 'hexgrid',
+      paint: { 'fill-color': '#000000', 'fill-opacity': 0 }
+    });
+
+  } else if (rep === 'relief') {
+    // RELIEF: 3D columns — nearer = taller (reachability mountain around the
+    // origin), luminous band colors, glowing hex-edge underlay. Mercator
+    // projection + pitched camera (set by theme).
+    addLayerOnce({
+      id: 'hexgrid-glow',
+      type: 'line',
+      source: 'hexgrid',
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 1.4,
+        'line-blur': 3,
+        'line-opacity': 0.55,
+      }
+    });
+
+    addLayerOnce({
+      id: 'hexgrid-fill',       // fill-extrusion, but keeps the interactive id
+      type: 'fill-extrusion',
+      source: 'hexgrid',
+      paint: {
+        'fill-extrusion-color': ['get', 'color'],
+        // closeness^2 * 280km: sharp peak at Bristol, 24h+ flattens to the floor
+        'fill-extrusion-height': [
+          '*',
+          ['^',
+            ['/',
+              ['max', 0, ['-', 1440, ['min', ['get', 'travelTimeMinutes'], 1440]]],
+              1440],
+            2.0],
+          280000
+        ],
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0.88,
+        'fill-extrusion-vertical-gradient': true,
+      }
+    });
+
+  } else {
+    // legacy flat hex rendering (no theme uses this now, kept for safety)
+    addLayerOnce({
+      id: 'hexgrid-fill',
+      type: 'fill',
+      source: 'hexgrid',
+      paint: {
+        'fill-color': ['get', 'color'],
+        'fill-opacity': [
+          'interpolate', ['linear'],
+          ['get', 'travelTimeMinutes'],
+          T.fillOpacity[0], T.fillOpacity[1],
+          T.fillOpacity[2], T.fillOpacity[3],
+          T.fillOpacity[4], T.fillOpacity[5],
+          T.fillOpacity[6], T.fillOpacity[7],
+          T.fillOpacity[8], T.fillOpacity[9],
+        ],
+      }
+    });
+    addLayerOnce({
+      id: 'hexgrid-line',
+      type: 'line',
+      source: 'hexgrid',
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 0, 3, 0, 5, 0.3, 8, 0.5
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          0, 0, 3, 0, 5, 0.1, 8, 0.15
+        ],
+      }
+    });
+  }
+
+  addLayerOnce({
     id: 'airports',
     type: 'circle',
     source: 'airports',
@@ -1871,7 +2221,7 @@ function addAppSourcesAndLayers() {
     }
   });
 
-  map.addLayer({
+  addLayerOnce({
     id: 'airport-labels',
     type: 'symbol',
     source: 'airports',
@@ -1894,7 +2244,7 @@ function addAppSourcesAndLayers() {
     }
   });
 
-  map.addLayer({
+  addLayerOnce({
     id: 'origin',
     type: 'circle',
     source: 'origin',
@@ -1907,7 +2257,7 @@ function addAppSourcesAndLayers() {
   });
 
   // Add a pulsing effect layer for origin
-  map.addLayer({
+  addLayerOnce({
     id: 'origin-pulse',
     type: 'circle',
     source: 'origin',
@@ -1921,7 +2271,7 @@ function addAppSourcesAndLayers() {
   // Add country borders on top of hex grid
   // Use the existing OpenMapTiles vector source from the base style
   if (map.getSource('openmaptiles')) {
-    map.addLayer({
+    addLayerOnce({
       id: 'country-borders',
       type: 'line',
       source: 'openmaptiles',
@@ -1941,7 +2291,7 @@ function addAppSourcesAndLayers() {
 
   // Route line visualization — shows flight path on hover
   // solid line for flight legs (airport → airport)
-  map.addLayer({
+  addLayerOnce({
     id: 'route-line-flights',
     type: 'line',
     source: 'route-line',
@@ -1954,7 +2304,7 @@ function addAppSourcesAndLayers() {
   });
 
   // lighter dashed line for ground segment (last airport → cell centroid)
-  map.addLayer({
+  addLayerOnce({
     id: 'route-line-ground',
     type: 'line',
     source: 'route-line',
@@ -1966,6 +2316,13 @@ function addAppSourcesAndLayers() {
       'line-dasharray': [4, 3]
     }
   });
+
+  // fill the active representation's derived source from the cached grid
+  refreshGridDerived();
+
+  // re-tune once the style settles — on some loads the first pass races the
+  // basemap layers and paint overrides (landcover mute etc) don't stick
+  map.once('idle', tuneBasemapForTheme);
 }
 
 function generateAirportGeoJSON() {
@@ -2066,6 +2423,7 @@ async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
 
   map.getSource('hexgrid').setData(gridData);
   map.getSource('origin').setData(generateOriginGeoJSON());
+  refreshGridDerived(); // contours/field track every grid change
 
   // update stats
   document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
@@ -2945,8 +3303,13 @@ document.getElementById('toggle-airports').addEventListener('change', (e) => {
 
 document.getElementById('toggle-grid').addEventListener('change', (e) => {
   const visibility = e.target.checked ? 'visible' : 'none';
-  map.setLayoutProperty('hexgrid-fill', 'visibility', visibility);
-  map.setLayoutProperty('hexgrid-line', 'visibility', visibility);
+  // representation layers vary per theme — toggle whichever exist
+  const gridLayers = ['hexgrid-fill', 'hexgrid-line', 'hexgrid-glow',
+    'contour-lines', 'graticule', 'field-heat'];
+  for (let b = 0; b < TIME_BANDS.length - 1; b++) gridLayers.push('hachure-band-' + b);
+  for (const id of gridLayers) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility);
+  }
 });
 
 document.getElementById('toggle-osrm').addEventListener('change', (e) => {
