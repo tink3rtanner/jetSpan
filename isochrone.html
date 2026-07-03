@@ -398,10 +398,275 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
+
+    /* Methods / sources footer (Mollick-style; styled per theme) */
+    .methods-footer {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 99;
+      font-size: 11px;
+      color: #666;
+      text-align: center;
+      white-space: nowrap;
+      pointer-events: none;
+      padding: 3px 14px;
+    }
+
+    /* =========================================================================
+       VINTAGE THEME (default) — antique cartography after Galton 1881
+       Parchment base, muted watercolor washes, engraved serif chrome.
+       Applied via body.theme-vintage; the un-classed styles above are the
+       "modern" dark theme, kept intact behind the theme toggle.
+       ========================================================================= */
+
+    body.theme-vintage {
+      background: #e6d9bd; /* parchment shows behind the globe in space areas */
+      color: #3a2f22;
+      font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', 'Times New Roman', serif;
+    }
+
+    /* the big lever: age the whole map canvas (tiles + hexes together) */
+    body.theme-vintage .maplibregl-canvas {
+      filter: sepia(0.30) saturate(1.05) brightness(1.02) contrast(0.94);
+    }
+
+    /* paper grain + vignette overlay — above map, below UI panels */
+    #vintage-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+      pointer-events: none;
+      /* vignette (aged edges) over fractal-noise paper grain */
+      background-image:
+        radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(92,64,22,0.16) 88%, rgba(70,46,14,0.28) 100%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='240' height='240' filter='url(%23n)' opacity='0.55'/></svg>");
+      mix-blend-mode: multiply;
+      opacity: 0.28;
+    }
+    body.theme-vintage #vintage-overlay { display: block; }
+
+    /* shared parchment panel treatment: double-rule "engraved" frame */
+    body.theme-vintage .title-panel,
+    body.theme-vintage .info-panel,
+    body.theme-vintage .legend,
+    body.theme-vintage .tooltip {
+      background: rgba(243, 234, 212, 0.94);
+      backdrop-filter: none;
+      border: 1px solid #6b5638;
+      border-radius: 2px;
+      box-shadow:
+        inset 0 0 0 3px rgba(243, 234, 212, 1),
+        inset 0 0 0 4px rgba(107, 86, 56, 0.55),
+        0 1px 6px rgba(60, 40, 15, 0.25);
+      color: #3a2f22;
+    }
+
+    body.theme-vintage .title-panel h1 {
+      font-family: inherit;
+      font-variant: small-caps;
+      letter-spacing: 1.5px;
+      font-weight: 700;
+      color: #2e2417;
+    }
+    body.theme-vintage .title-panel .subtitle {
+      color: #6b5a41;
+      font-style: italic;
+    }
+
+    body.theme-vintage .info-btn {
+      background: rgba(243, 234, 212, 0.94);
+      border: 1px solid #6b5638;
+      color: #5a4832;
+      backdrop-filter: none;
+    }
+    body.theme-vintage .info-btn:hover,
+    body.theme-vintage .info-btn.active {
+      background: #e6d9bd;
+      color: #2e2417;
+    }
+
+    body.theme-vintage .info-section-label,
+    body.theme-vintage .legend h3 {
+      color: #7a6748;
+      font-variant: small-caps;
+      text-transform: none;
+      letter-spacing: 1.2px;
+      font-size: 12px;
+      border-bottom: 1px solid rgba(107, 86, 56, 0.35);
+      padding-bottom: 4px;
+    }
+
+    body.theme-vintage .toggle-row,
+    body.theme-vintage .slider-row {
+      border-bottom-color: rgba(107, 86, 56, 0.25);
+    }
+
+    body.theme-vintage .toggle-slider {
+      background: rgba(107, 86, 56, 0.3);
+    }
+    body.theme-vintage .toggle-slider:before { background: #f7f1e1; }
+    body.theme-vintage .toggle-switch input:checked + .toggle-slider {
+      background: #6b5638;
+    }
+
+    body.theme-vintage .slider-row input[type="range"] {
+      background: rgba(107, 86, 56, 0.3);
+    }
+    body.theme-vintage .slider-row input[type="range"]::-webkit-slider-thumb {
+      background: #6b5638;
+    }
+
+    body.theme-vintage .theme-select,
+    .theme-select {
+      font-family: inherit;
+      font-size: 13px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.1);
+      color: inherit;
+    }
+    body.theme-vintage .theme-select {
+      border: 1px solid #6b5638;
+      background: #f7f1e1;
+      color: #3a2f22;
+      border-radius: 2px;
+    }
+
+    body.theme-vintage .legend-color {
+      border: 1px solid rgba(60, 45, 25, 0.55);
+      border-radius: 0;
+      width: 26px;
+      height: 13px;
+    }
+    body.theme-vintage .legend-item { font-size: 12.5px; }
+
+    body.theme-vintage .tooltip-time { color: #8b3a2f; }
+    body.theme-vintage .tooltip-breakdown {
+      background: rgba(107, 86, 56, 0.08);
+      border-radius: 2px;
+    }
+    body.theme-vintage .breakdown-row { border-bottom-color: rgba(107, 86, 56, 0.25); }
+    body.theme-vintage .breakdown-row .label { color: #7a6748; }
+    body.theme-vintage .breakdown-row.route { color: #8a7354; }
+
+    body.theme-vintage .stat-value { color: #2e2417; }
+    body.theme-vintage .stat-label { color: #8a7354; }
+
+    body.theme-vintage .loading-overlay {
+      background: rgba(230, 217, 189, 0.96);
+    }
+    body.theme-vintage .loading-spinner {
+      border-color: rgba(107, 86, 56, 0.2);
+      border-top-color: #6b5638;
+    }
+    body.theme-vintage .loading-text { color: #5a4832; }
+
+    body.theme-vintage .methods-footer {
+      font-style: italic;
+      color: #5a4832;
+      background: rgba(243, 234, 212, 0.85);
+      border: 1px solid rgba(107, 86, 56, 0.45);
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
+    /* =========================================================================
+       MODERN THEME — clean contemporary light. Base (un-classed) CSS above is
+       the dark skin; these override panels/chrome to a crisp light look.
+       ========================================================================= */
+
+    body.theme-modern {
+      background: #f8fafc;
+      color: #1e293b;
+    }
+
+    body.theme-modern .title-panel,
+    body.theme-modern .info-panel,
+    body.theme-modern .legend,
+    body.theme-modern .tooltip {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      color: #1e293b;
+      box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+    }
+
+    body.theme-modern .title-panel .subtitle,
+    body.theme-modern .legend h3,
+    body.theme-modern .info-section-label,
+    body.theme-modern .loading-text,
+    body.theme-modern .breakdown-row .label,
+    body.theme-modern .stat-label { color: #64748b; }
+
+    body.theme-modern .info-btn {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      color: #64748b;
+    }
+    body.theme-modern .info-btn:hover,
+    body.theme-modern .info-btn.active {
+      background: #f1f5f9;
+      color: #1e293b;
+    }
+
+    body.theme-modern .toggle-row,
+    body.theme-modern .slider-row { border-bottom-color: rgba(15, 23, 42, 0.08); }
+    body.theme-modern .toggle-slider { background: rgba(15, 23, 42, 0.2); }
+    body.theme-modern .toggle-switch input:checked + .toggle-slider { background: #0d9488; }
+    body.theme-modern .slider-row input[type="range"] { background: rgba(15, 23, 42, 0.15); }
+    body.theme-modern .slider-row input[type="range"]::-webkit-slider-thumb { background: #0d9488; }
+
+    body.theme-modern .theme-select {
+      border: 1px solid rgba(15, 23, 42, 0.2);
+      background: #ffffff;
+      color: #1e293b;
+    }
+
+    body.theme-modern .tooltip-time { color: #0d9488; }
+    body.theme-modern .tooltip-breakdown { background: rgba(15, 23, 42, 0.04); }
+    body.theme-modern .breakdown-row { border-bottom-color: rgba(15, 23, 42, 0.08); }
+
+    body.theme-modern .loading-overlay { background: rgba(248, 250, 252, 0.95); }
+    body.theme-modern .loading-spinner {
+      border-color: rgba(15, 23, 42, 0.1);
+      border-top-color: #0d9488;
+    }
+
+    body.theme-modern .methods-footer {
+      color: #64748b;
+      background: rgba(255, 255, 255, 0.75);
+      border-radius: 6px;
+    }
+
+    /* maplibre attribution + nav controls, aged to match */
+    body.theme-vintage .maplibregl-ctrl-attrib {
+      background: rgba(243, 234, 212, 0.75) !important;
+      font-family: inherit;
+    }
+    body.theme-vintage .maplibregl-ctrl-group {
+      background: rgba(243, 234, 212, 0.94);
+      border: 1px solid #6b5638;
+      border-radius: 2px;
+      box-shadow: none;
+    }
+    body.theme-vintage .maplibregl-ctrl-group button + button {
+      border-top: 1px solid rgba(107, 86, 56, 0.35);
+    }
   </style>
 </head>
-<body>
+<body class="theme-vintage">
   <div id="map"></div>
+
+  <!-- paper grain + vignette (vintage theme only; pointer-transparent) -->
+  <div id="vintage-overlay"></div>
+
+  <!-- methods / sources footer (Mollick-style) -->
+  <div class="methods-footer">
+    Travel times: multimodal, max 2 stops &middot; Data: OurAirports, OpenFlights, OSRM &middot; Isochrone lineage after Francis Galton, 1881
+  </div>
 
   <!-- Title (top left) -->
   <div class="title-panel">
@@ -478,6 +743,14 @@
           <span class="slider-value" id="color-scale-label">1.0×</span>
         </div>
         <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1">
+      </div>
+      <div class="toggle-row">
+        <span>Style</span>
+        <select class="theme-select" id="theme-select">
+          <option value="vintage">Vintage</option>
+          <option value="modern">Modern</option>
+          <option value="dark">Dark</option>
+        </select>
       </div>
     </div>
   </div>
@@ -1056,23 +1329,196 @@ const AIRPORTS = [
 ];
 
 // =============================================================================
-// TIME BANDS (Galton-style colors)
+// THEMES — three complete looks: vintage (default), modern, dark
+// Each theme = basemap style + 10 band colors + map paint + UI skin (CSS class)
+// =============================================================================
+const THEMES = {
+  // Antique cartography after Galton's 1881 Isochronic Passage Chart:
+  // parchment base (sepia CSS filter on canvas), muted watercolor washes in
+  // Galton's own hue sequence (green -> yellow -> rose -> slate blue -> umber),
+  // engraved serif UI chrome.
+  vintage: {
+    label: 'Vintage',
+    basemap: 'https://tiles.openfreemap.org/styles/bright',
+    bodyClass: 'theme-vintage',
+    legendTitle: 'Explanation of Colours',
+    title: 'Isochronic Passage Chart',
+    subtitle: 'Shortest journey times from Bristol, England — after Galton, 1881',
+    bandColors: [
+      // NB: saturation is pre-boosted ~30% — the sepia canvas filter mutes it
+      // back down to Galton-wash levels
+      '#2f7a4e', // < 2h    deep sage (Galton's "within 10 days" Europe green)
+      '#63a35e', // 2-4h    light sage
+      '#ddc75b', // 4-6h    straw
+      '#cc9832', // 6-8h    ochre
+      '#dd9186', // 8-10h   pale rose
+      '#bb5c4e', // 10-12h  madder rose
+      '#77a3cc', // 12-14h  pale slate blue
+      '#41729f', // 14-18h  slate blue
+      '#a06a35', // 18-24h  tan
+      '#5c3d20', // 24h+    dark umber
+    ],
+    paint: {
+      // watercolor washes: present enough to read, thin enough for paper to show
+      fillOpacity: [0, 0.75, 360, 0.68, 600, 0.58, 840, 0.48, 1200, 0.38],
+      airportColor: '#3f3020', airportStroke: '#f0e6cf',
+      labelColor: '#2e2417', labelHalo: '#f0e6cf',
+      originColor: '#8b3a2f', originStroke: '#f5eedd',
+      borderColor: 'rgba(92, 70, 48, 0.55)',
+      routeColor: '#3a2f22',
+    },
+  },
+  // Clean contemporary light: minimal gray basemap, smooth teal->indigo
+  // perceptual ramp, crisp sans chrome.
+  modern: {
+    label: 'Modern',
+    continuous: true, // smooth gradient fills instead of hard band steps
+    basemap: 'https://tiles.openfreemap.org/styles/positron',
+    bodyClass: 'theme-modern',
+    legendTitle: 'Travel Time',
+    title: 'Flight Isochrone Map',
+    subtitle: 'Multimodal travel times from Bristol, UK',
+    bandColors: [
+      '#14b8a6', // < 2h    teal
+      '#0d9488', // 2-4h
+      '#0891b2', // 4-6h    cyan-blue
+      '#0284c7', // 6-8h
+      '#2563eb', // 8-10h   blue
+      '#4f46e5', // 10-12h  indigo
+      '#6d28d9', // 12-14h  violet
+      '#7e22ce', // 14-18h  purple
+      '#581c87', // 18-24h  deep purple
+      '#3b0764', // 24h+    near-black purple
+    ],
+    paint: {
+      fillOpacity: [0, 0.50, 360, 0.45, 600, 0.35, 840, 0.25, 1200, 0.15],
+      airportColor: '#334155', airportStroke: '#ffffff',
+      labelColor: '#1e293b', labelHalo: '#ffffff',
+      originColor: '#0d9488', originStroke: '#ffffff',
+      borderColor: 'rgba(100, 116, 139, 0.5)',
+      routeColor: '#1e293b',
+    },
+  },
+  // Night / data-viz: dark basemap, the original luminous rainbow bands.
+  dark: {
+    label: 'Dark',
+    basemap: 'https://tiles.openfreemap.org/styles/dark',
+    bodyClass: 'theme-dark',
+    legendTitle: 'Travel Time',
+    title: 'Flight Isochrone Map',
+    subtitle: 'Multimodal travel times from Bristol, UK',
+    bandColors: [
+      '#22c55e', // < 2h    green
+      '#84cc16', // 2-4h    lime
+      '#eab308', // 4-6h    yellow
+      '#f97316', // 6-8h    orange
+      '#ef4444', // 8-10h   red
+      '#dc2626', // 10-12h  dark red
+      '#a855f7', // 12-14h  purple
+      '#7c3aed', // 14-18h  violet
+      '#4c1d95', // 18-24h  deep purple
+      '#1e1b4b', // 24h+    near-black purple
+    ],
+    paint: {
+      // dark basemap swallows thin fills: run hotter
+      fillOpacity: [0, 0.55, 360, 0.50, 600, 0.40, 840, 0.30, 1200, 0.20],
+      airportColor: '#ffffff', airportStroke: '#1a1a1a',
+      labelColor: '#ffffff', labelHalo: '#000000',
+      originColor: '#22c55e', originStroke: '#ffffff',
+      borderColor: 'rgba(255, 255, 255, 0.6)',
+      routeColor: '#ffffff',
+    },
+  },
+};
+
+// active theme — persisted in localStorage, vintage by default
+let currentTheme = (() => {
+  try {
+    const saved = localStorage.getItem('jetspan-theme');
+    if (saved && THEMES[saved]) return saved;
+  } catch (e) {}
+  return 'vintage';
+})();
+
+// =============================================================================
+// TIME BANDS (colors come from the active theme; thresholds are theme-independent)
 // =============================================================================
 const TIME_BANDS = [
-  { maxHours: 2, color: '#22c55e', label: '< 2h' },      // green
-  { maxHours: 4, color: '#84cc16', label: '2-4h' },      // lime
-  { maxHours: 6, color: '#eab308', label: '4-6h' },      // yellow
-  { maxHours: 8, color: '#f97316', label: '6-8h' },      // orange
-  { maxHours: 10, color: '#ef4444', label: '8-10h' },    // red
-  { maxHours: 12, color: '#dc2626', label: '10-12h' },   // dark red
-  { maxHours: 14, color: '#a855f7', label: '12-14h' },   // purple - distinct from red
-  { maxHours: 18, color: '#7c3aed', label: '14-18h' },   // violet
-  { maxHours: 24, color: '#4c1d95', label: '18-24h' },   // deep purple
-  { maxHours: Infinity, color: '#1e1b4b', label: '24h+' }, // near black purple
+  { maxHours: 2, color: '#22c55e', label: '< 2h' },
+  { maxHours: 4, color: '#84cc16', label: '2-4h' },
+  { maxHours: 6, color: '#eab308', label: '4-6h' },
+  { maxHours: 8, color: '#f97316', label: '6-8h' },
+  { maxHours: 10, color: '#ef4444', label: '8-10h' },
+  { maxHours: 12, color: '#dc2626', label: '10-12h' },
+  { maxHours: 14, color: '#a855f7', label: '12-14h' },
+  { maxHours: 18, color: '#7c3aed', label: '14-18h' },
+  { maxHours: 24, color: '#4c1d95', label: '18-24h' },
+  { maxHours: Infinity, color: '#1e1b4b', label: '24h+' },
 ];
 
 // color scale: multiplier on band thresholds (higher = more green)
 let colorScale = 1.0;
+
+// =============================================================================
+// THEME ENGINE
+// =============================================================================
+
+// apply everything about a theme that does NOT require the map object:
+// body class, band colors, legend swatches + title, title panel text
+function applyThemeChrome(name) {
+  const theme = THEMES[name];
+  if (!theme) return;
+  currentTheme = name;
+  try { localStorage.setItem('jetspan-theme', name); } catch (e) {}
+
+  document.body.classList.remove('theme-vintage', 'theme-modern', 'theme-dark');
+  document.body.classList.add(theme.bodyClass);
+
+  // recolor the band table in place (getTimeBandColor reads from it)
+  TIME_BANDS.forEach((band, i) => { band.color = theme.bandColors[i]; });
+
+  // legend swatches + title
+  const swatches = document.querySelectorAll('.legend-color');
+  TIME_BANDS.forEach((band, i) => {
+    if (swatches[i]) swatches[i].style.background = band.color;
+  });
+  const legendTitle = document.querySelector('.legend h3');
+  if (legendTitle) legendTitle.textContent = theme.legendTitle;
+
+  // title panel copy
+  const titleEl = document.querySelector('.title-panel h1');
+  const subtitleEl = document.querySelector('.title-panel .subtitle');
+  if (titleEl) titleEl.textContent = theme.title;
+  if (subtitleEl) subtitleEl.textContent = theme.subtitle;
+
+  // theme select reflects state
+  const sel = document.getElementById('theme-select');
+  if (sel && sel.value !== name) sel.value = name;
+}
+
+// full theme switch at runtime: chrome + basemap swap + re-add app layers
+function applyTheme(name) {
+  const theme = THEMES[name];
+  if (!theme) return;
+  applyThemeChrome(name);
+
+  if (map) {
+    // recolor cached grid features so re-added layers come up in new colors
+    if (gridData) {
+      for (const f of gridData.features) {
+        f.properties.color = showOSRMCoverage
+          ? (f.properties.osrm ? '#22c55e' : '#ef4444')
+          : getTimeBandColor(f.properties.travelTimeMinutes);
+      }
+    }
+    // setStyle wipes our sources/layers; re-add them once the new style loads.
+    // (the global 'style.load' handler re-enables globe projection)
+    map.setStyle(theme.basemap);
+    map.once('style.load', () => {
+      addAppSourcesAndLayers();
+    });
+  }
+}
 
 // =============================================================================
 // UTILITIES
@@ -1113,12 +1559,29 @@ function toggleInfoPanel() {
   btn.classList.toggle('active');
 }
 
+// lerp two #rrggbb colors (t in 0..1)
+function hexLerp(a, b, t) {
+  const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16));
+  const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
+  return '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
 function getTimeBandColor(totalMinutes) {
   const hours = totalMinutes / 60;
-  for (const band of TIME_BANDS) {
+  const continuous = THEMES[currentTheme] && THEMES[currentTheme].continuous;
+  for (let i = 0; i < TIME_BANDS.length; i++) {
+    const band = TIME_BANDS[i];
     // scale thresholds: higher colorScale = wider bands = more green
     if (hours < band.maxHours * colorScale) {
-      return band.color;
+      if (!continuous || band.maxHours === Infinity) return band.color;
+      // continuous mode (modern theme): blend toward the next band by
+      // position within this band — a smooth gradient instead of hard steps
+      const lo = (i > 0 ? TIME_BANDS[i - 1].maxHours : 0) * colorScale;
+      const hi = band.maxHours * colorScale;
+      const t = Math.max(0, Math.min(1, (hours - lo) / (hi - lo)));
+      const next = TIME_BANDS[Math.min(i + 1, TIME_BANDS.length - 1)];
+      return hexLerp(band.color, next.color, t * 0.5); // half-step blend keeps band identity
     }
   }
   return TIME_BANDS[TIME_BANDS.length - 1].color;
@@ -1208,7 +1671,7 @@ async function initMap() {
 
   map = new maplibregl.Map({
     container: 'map',
-    style: 'https://tiles.openfreemap.org/styles/positron',
+    style: THEMES[currentTheme].basemap,
     center: ORIGINS[currentOrigin].coordinates,
     zoom: 2,
   });
@@ -1221,192 +1684,11 @@ async function initMap() {
   map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
   map.on('load', () => {
-    // Add sources
-    map.addSource('hexgrid', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    });
-
-    map.addSource('airports', {
-      type: 'geojson',
-      data: generateAirportGeoJSON(),
-    });
-
-    map.addSource('origin', {
-      type: 'geojson',
-      data: generateOriginGeoJSON(),
-    });
-
-    // Add layers - order matters! Hex grid first, then airports on top
-    map.addLayer({
-      id: 'hexgrid-fill',
-      type: 'fill',
-      source: 'hexgrid',
-      paint: {
-        'fill-color': ['get', 'color'],
-        // Fade out very long travel times (mostly ocean/remote)
-        'fill-opacity': [
-          'interpolate', ['linear'],
-          ['get', 'travelTimeMinutes'],
-          0, 0.45,     // Near origin: semi-transparent
-          360, 0.4,    // 6 hours
-          600, 0.3,    // 10 hours
-          840, 0.2,    // 14 hours
-          1200, 0.1    // 20+ hours: very faint
-        ],
-      }
-    });
-
-    map.addLayer({
-      id: 'hexgrid-line',
-      type: 'line',
-      source: 'hexgrid',
-      paint: {
-        'line-color': ['get', 'color'],
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          0, 0,      // No lines when zoomed out
-          3, 0,      // Still no lines
-          5, 0.3,    // Thin lines at medium zoom
-          8, 0.5     // Slightly thicker when zoomed in
-        ],
-        'line-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          0, 0,
-          3, 0,
-          5, 0.1,
-          8, 0.15
-        ],
-      }
-    });
-
-    map.addLayer({
-      id: 'airports',
-      type: 'circle',
-      source: 'airports',
-      paint: {
-        'circle-radius': [
-          'interpolate', ['linear'], ['zoom'],
-          0, 1.5,    // tiny dots at globe view (3000+ airports)
-          3, 2,
-          5, 3.5,
-          8, 6
-        ],
-        'circle-color': '#ffffff',
-        'circle-stroke-color': '#1a1a1a',
-        'circle-stroke-width': [
-          'interpolate', ['linear'], ['zoom'],
-          0, 0.5,
-          5, 1.5,
-          8, 2
-        ],
-        'circle-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          0, 0.5,
-          4, 0.8,
-          6, 1
-        ],
-      }
-    });
-
-    map.addLayer({
-      id: 'airport-labels',
-      type: 'symbol',
-      source: 'airports',
-      minzoom: 5,  // labels only at higher zoom (3000+ airports)
-      layout: {
-        'text-field': ['get', 'code'],
-        'text-size': 10,
-        'text-offset': [0, 1.2],
-        'text-anchor': 'top',
-        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-        'text-allow-overlap': false,
-        'text-optional': true,
-      },
-      paint: {
-        'text-color': '#ffffff',
-        'text-halo-color': '#000000',
-        'text-halo-width': 1.5,
-      }
-    });
-
-    map.addLayer({
-      id: 'origin',
-      type: 'circle',
-      source: 'origin',
-      paint: {
-        'circle-radius': 12,
-        'circle-color': '#22c55e',
-        'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': 3,
-      }
-    });
-
-    // Add a pulsing effect layer for origin
-    map.addLayer({
-      id: 'origin-pulse',
-      type: 'circle',
-      source: 'origin',
-      paint: {
-        'circle-radius': 20,
-        'circle-color': '#22c55e',
-        'circle-opacity': 0.3,
-      }
-    }, 'origin');
-
-    // Add country borders on top of hex grid
-    // Use the existing OpenMapTiles vector source from the base style
-    map.addLayer({
-      id: 'country-borders',
-      type: 'line',
-      source: 'openmaptiles',
-      'source-layer': 'boundary',
-      filter: ['==', ['get', 'admin_level'], 2],
-      paint: {
-        'line-color': 'rgba(255, 255, 255, 0.6)',
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          1, 0.5,
-          4, 1.5,
-          8, 2.5
-        ],
-      }
-    });
-
-    // Route line visualization — shows flight path on hover
-    map.addSource('route-line', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    });
-
-    // solid line for flight legs (airport → airport)
-    map.addLayer({
-      id: 'route-line-flights',
-      type: 'line',
-      source: 'route-line',
-      filter: ['==', ['get', 'segment'], 'flight'],
-      paint: {
-        'line-color': '#ffffff',
-        'line-width': 2.5,
-        'line-opacity': 0.85
-      }
-    });
-
-    // lighter dashed line for ground segment (last airport → cell centroid)
-    map.addLayer({
-      id: 'route-line-ground',
-      type: 'line',
-      source: 'route-line',
-      filter: ['==', ['get', 'segment'], 'ground'],
-      paint: {
-        'line-color': '#ffffff',
-        'line-width': 2,
-        'line-opacity': 0.6,
-        'line-dasharray': [4, 3]
-      }
-    });
+    addAppSourcesAndLayers();
 
     // Interaction
+    // (these delegated per-layer handlers survive setStyle/theme switches —
+    // maplibre resolves the layer id at event time)
     map.on('mousemove', 'hexgrid-fill', (e) => {
       if (e.features.length > 0) {
         const props = e.features[0].properties;
@@ -1462,6 +1744,227 @@ async function initMap() {
 
     // Generate initial grid
     updateGrid();
+  });
+}
+
+// add all app sources + layers on top of the current basemap style.
+// called on initial map load AND after every theme switch (setStyle wipes them).
+// paint values come from the active theme.
+// per-theme retouch of the basemap's OWN layers (labels, water), run per style
+// load. vintage: ink-on-parchment labels + duck-egg sea (the sepia canvas
+// filter does the rest). dark: brighten labels so they survive the fills.
+function tuneBasemapForTheme() {
+  const style = map.getStyle();
+  if (!style || !style.layers) return;
+  for (const layer of style.layers) {
+    try {
+      if (currentTheme === 'vintage') {
+        if (layer.type === 'symbol') {
+          map.setPaintProperty(layer.id, 'text-color', '#4a3a26');
+          map.setPaintProperty(layer.id, 'text-halo-color', 'rgba(243, 234, 212, 0.8)');
+        } else if (layer.type === 'fill' && /water|ocean/.test(layer.id)) {
+          map.setPaintProperty(layer.id, 'fill-color', '#ccdad2'); // pale duck-egg sea
+        }
+      } else if (currentTheme === 'dark') {
+        if (layer.type === 'symbol') {
+          map.setPaintProperty(layer.id, 'text-color', '#e2e8f0');
+          map.setPaintProperty(layer.id, 'text-halo-color', 'rgba(0, 0, 0, 0.85)');
+        }
+      }
+    } catch (e) { /* some layers reject paint props; skip */ }
+  }
+}
+
+function addAppSourcesAndLayers() {
+  const T = THEMES[currentTheme].paint;
+  tuneBasemapForTheme();
+
+  // Sources (hexgrid restores cached grid data instantly on theme switch)
+  if (!map.getSource('hexgrid')) {
+    map.addSource('hexgrid', {
+      type: 'geojson',
+      data: gridData || { type: 'FeatureCollection', features: [] },
+    });
+  }
+  if (!map.getSource('airports')) {
+    map.addSource('airports', { type: 'geojson', data: generateAirportGeoJSON() });
+  }
+  if (!map.getSource('origin')) {
+    map.addSource('origin', { type: 'geojson', data: generateOriginGeoJSON() });
+  }
+  if (!map.getSource('route-line')) {
+    map.addSource('route-line', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+  }
+
+  // Add layers - order matters! Hex grid first, then airports on top
+  map.addLayer({
+    id: 'hexgrid-fill',
+    type: 'fill',
+    source: 'hexgrid',
+    paint: {
+      'fill-color': ['get', 'color'],
+      // Fade out very long travel times (mostly ocean/remote)
+      'fill-opacity': [
+        'interpolate', ['linear'],
+        ['get', 'travelTimeMinutes'],
+        T.fillOpacity[0], T.fillOpacity[1],
+        T.fillOpacity[2], T.fillOpacity[3],
+        T.fillOpacity[4], T.fillOpacity[5],
+        T.fillOpacity[6], T.fillOpacity[7],
+        T.fillOpacity[8], T.fillOpacity[9],
+      ],
+    }
+  });
+
+  map.addLayer({
+    id: 'hexgrid-line',
+    type: 'line',
+    source: 'hexgrid',
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 0,      // No lines when zoomed out
+        3, 0,      // Still no lines
+        5, 0.3,    // Thin lines at medium zoom
+        8, 0.5     // Slightly thicker when zoomed in
+      ],
+      'line-opacity': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 0,
+        3, 0,
+        5, 0.1,
+        8, 0.15
+      ],
+    }
+  });
+
+  map.addLayer({
+    id: 'airports',
+    type: 'circle',
+    source: 'airports',
+    paint: {
+      'circle-radius': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 1.5,    // tiny dots at globe view (3000+ airports)
+        3, 2,
+        5, 3.5,
+        8, 6
+      ],
+      'circle-color': T.airportColor,
+      'circle-stroke-color': T.airportStroke,
+      'circle-stroke-width': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 0.5,
+        5, 1.5,
+        8, 2
+      ],
+      'circle-opacity': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 0.5,
+        4, 0.8,
+        6, 1
+      ],
+    }
+  });
+
+  map.addLayer({
+    id: 'airport-labels',
+    type: 'symbol',
+    source: 'airports',
+    minzoom: 5,  // labels only at higher zoom (3000+ airports)
+    layout: {
+      'text-field': ['get', 'code'],
+      'text-size': 10,
+      'text-offset': [0, 1.2],
+      'text-anchor': 'top',
+      // NB 'Noto Sans Bold', not 'Open Sans Bold' — openfreemap's glyph server
+      // only carries Noto (Open Sans 404s and kills airport labels at z>=5)
+      'text-font': ['Noto Sans Bold'],
+      'text-allow-overlap': false,
+      'text-optional': true,
+    },
+    paint: {
+      'text-color': T.labelColor,
+      'text-halo-color': T.labelHalo,
+      'text-halo-width': 1.5,
+    }
+  });
+
+  map.addLayer({
+    id: 'origin',
+    type: 'circle',
+    source: 'origin',
+    paint: {
+      'circle-radius': 12,
+      'circle-color': T.originColor,
+      'circle-stroke-color': T.originStroke,
+      'circle-stroke-width': 3,
+    }
+  });
+
+  // Add a pulsing effect layer for origin
+  map.addLayer({
+    id: 'origin-pulse',
+    type: 'circle',
+    source: 'origin',
+    paint: {
+      'circle-radius': 20,
+      'circle-color': T.originColor,
+      'circle-opacity': 0.3,
+    }
+  }, 'origin');
+
+  // Add country borders on top of hex grid
+  // Use the existing OpenMapTiles vector source from the base style
+  if (map.getSource('openmaptiles')) {
+    map.addLayer({
+      id: 'country-borders',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'boundary',
+      filter: ['==', ['get', 'admin_level'], 2],
+      paint: {
+        'line-color': T.borderColor,
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          1, 0.5,
+          4, 1.5,
+          8, 2.5
+        ],
+      }
+    });
+  }
+
+  // Route line visualization — shows flight path on hover
+  // solid line for flight legs (airport → airport)
+  map.addLayer({
+    id: 'route-line-flights',
+    type: 'line',
+    source: 'route-line',
+    filter: ['==', ['get', 'segment'], 'flight'],
+    paint: {
+      'line-color': T.routeColor,
+      'line-width': 2.5,
+      'line-opacity': 0.85
+    }
+  });
+
+  // lighter dashed line for ground segment (last airport → cell centroid)
+  map.addLayer({
+    id: 'route-line-ground',
+    type: 'line',
+    source: 'route-line',
+    filter: ['==', ['get', 'segment'], 'ground'],
+    paint: {
+      'line-color': T.routeColor,
+      'line-width': 2,
+      'line-opacity': 0.6,
+      'line-dasharray': [4, 3]
+    }
   });
 }
 
@@ -2460,7 +2963,14 @@ document.getElementById('color-scale').addEventListener('input', (e) => {
   updateLegend();
 });
 
-// Initialize
+// theme selector: full switch (chrome + basemap + layers)
+document.getElementById('theme-select').addEventListener('change', (e) => {
+  applyTheme(e.target.value);
+});
+
+// Initialize — apply saved/default theme chrome BEFORE the map spins up
+// (initMap reads THEMES[currentTheme].basemap; layer paint reads it on load)
+applyThemeChrome(currentTheme);
 initMap();
 </script>
 </body>
