@@ -752,6 +752,15 @@
           <option value="dark">Dark</option>
         </select>
       </div>
+      <div class="toggle-row" id="palette-row">
+        <span>Colours</span>
+        <select class="theme-select" id="palette-select">
+          <option value="heatmap">Heat</option>
+          <option value="monowarm">Sepia</option>
+          <option value="viridis">Viridis</option>
+          <option value="galton">Galton 1881</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -1336,25 +1345,76 @@ const AIRPORTS = [
 //   dark    -> 'relief'   : 3D fill-extrusion columns, pitched camera
 // Each theme = representation + basemap + band colors + paint + UI skin.
 // =============================================================================
-const THEMES = {
-  // Antique cartography after Galton's 1881 Isochronic Passage Chart:
-  // parchment base (sepia CSS filter on canvas) with soft TRANSLUCENT
-  // watercolour WASHES over the engraved base — Galton's actual palette
-  // (green nearest -> yellow -> pink -> blue -> brown farthest), faint ink
-  // isolines between bands, and a lat/long graticule. The colour makes
-  // travel-time readable; the engraving keeps it antique.
-  vintage: {
-    label: 'Vintage',
-    representation: 'contours',
-    basemap: 'https://tiles.openfreemap.org/styles/bright',
-    bodyClass: 'theme-vintage',
-    legendTitle: 'Explanation of Colours',
-    title: 'Isochronic Passage Chart',
-    subtitle: 'Shortest journey times from Bristol, England — after Galton, 1881',
-    bandColors: [
-      // Galton's five wash colours (green/yellow/pink/blue/brown), two shades
-      // each across the 10 bands. Saturation pre-boosted ~30% — the sepia
-      // canvas filter mutes it back down to watercolour-wash levels.
+// -----------------------------------------------------------------------------
+// VINTAGE PALETTES — selectable colour ramps for the engraved theme.
+// Design rule (josh, 2026-07-04): the SEQUENCE must be intuitively ORDERED —
+// a viewer should know from colour alone which band is nearer/farther. The
+// original Galton ramp (green→yellow→pink→blue→brown) fails this (pink vs
+// blue vs brown carries no order), so it's kept only as a legacy option.
+// All ramps are pre-boosted in saturation ~30% — the sepia canvas filter
+// mutes them back down to watercolour-wash levels over the parchment.
+// -----------------------------------------------------------------------------
+const VINTAGE_PALETTES = {
+  // universal "cool = near, hot/dark = far" convention — DEFAULT
+  heatmap: {
+    label: 'Heat',
+    colors: [
+      '#157f3b', // < 2h    green (fast)
+      '#6fa621', // 2-4h    yellow-green
+      '#d8c81e', // 4-6h    yellow
+      '#e89a12', // 6-8h    amber
+      '#e05f10', // 8-10h   orange
+      '#d42a1e', // 10-12h  red
+      '#a8161f', // 12-14h  dark red
+      '#7a1030', // 14-18h  maroon
+      '#4a0d3d', // 18-24h  deep purple
+      '#1e0a2e', // 24h+    near-black purple (slowest)
+    ],
+  },
+  // single-hue light→dark: darker = farther. Sepia-cohesive with parchment.
+  // Ramp is deliberately STEEP at the light end — the 0.42 wash alpha over
+  // parchment compresses light steps ~2.4x, so even spacing reads as one
+  // cream blob (tuned visually 2026-07-04, 3 iterations).
+  monowarm: {
+    label: 'Sepia',
+    colors: [
+      '#f2e3ae', // < 2h    pale cream (near = barely stained parchment)
+      '#dcb567', // 2-4h    light tan
+      '#c79042', // 4-6h    tan
+      '#b1722c', // 6-8h    amber
+      '#9c5a20', // 8-10h   dark amber
+      '#864617', // 10-12h  rust
+      '#6e3511', // 12-14h  dark rust
+      '#54260b', // 14-18h  umber
+      '#3b1a07', // 18-24h  dark umber
+      '#241003', // 24h+    deep espresso
+    ],
+  },
+  // perceptually-uniform sequential ramp (viridis-ish, reversed so light
+  // yellow = near and deep indigo = far — dark = far, like the others).
+  // Colourblind-safe ordering. Saturation boosted + blue end steepened vs
+  // stock viridis — the sepia canvas filter greys the teals otherwise
+  // (tuned visually 2026-07-04).
+  viridis: {
+    label: 'Viridis',
+    colors: [
+      '#ffef1f', // < 2h    bright yellow (fast)
+      '#b8e026', // 2-4h    yellow-green
+      '#6ecf4f', // 4-6h    green
+      '#2cbd6e', // 6-8h    sea green
+      '#12a389', // 8-10h   teal-green
+      '#0e7f8c', // 10-12h  teal
+      '#1a5f92', // 12-14h  blue-teal
+      '#28428c', // 14-18h  steel blue
+      '#2f2374', // 18-24h  indigo
+      '#2b0a52', // 24h+    deep violet (slowest)
+    ],
+  },
+  // LEGACY: Galton's actual 1881 wash colours (green/yellow/pink/blue/brown,
+  // two shades each). Historically faithful but NOT perceptually ordered.
+  galton: {
+    label: 'Galton 1881',
+    colors: [
       '#1e7a48', // < 2h    deep sage green (Galton's "within 10 days" Europe)
       '#5aa76b', // 2-4h    light sage
       '#e9dd6e', // 4-6h    pale straw yellow
@@ -1366,6 +1426,26 @@ const THEMES = {
       '#bd8a48', // 18-24h  tan
       '#7a5122', // 24h+    dark umber
     ],
+  },
+};
+
+const THEMES = {
+  // Antique cartography after Galton's 1881 Isochronic Passage Chart:
+  // parchment base (sepia CSS filter on canvas) with soft TRANSLUCENT
+  // watercolour WASHES over the engraved base — palette selectable from
+  // VINTAGE_PALETTES (ordered ramps; heatmap default), faint ink
+  // isolines between bands, and a lat/long graticule. The colour makes
+  // travel-time readable; the engraving keeps it antique.
+  vintage: {
+    label: 'Vintage',
+    representation: 'contours',
+    basemap: 'https://tiles.openfreemap.org/styles/bright',
+    bodyClass: 'theme-vintage',
+    legendTitle: 'Explanation of Colours',
+    title: 'Isochronic Passage Chart',
+    subtitle: 'Shortest journey times from Bristol, England — after Galton, 1881',
+    // overwritten at startup + on picker change from VINTAGE_PALETTES
+    bandColors: VINTAGE_PALETTES.heatmap.colors,
     paint: {
       // fillOpacity kept for API compat (invisible hit-layer uses ~0)
       fillOpacity: [0, 0.75, 360, 0.68, 600, 0.58, 840, 0.48, 1200, 0.38],
@@ -1457,6 +1537,36 @@ let currentTheme = (() => {
   return 'vintage';
 })();
 
+// active vintage palette — persisted in localStorage, heatmap by default
+let currentPalette = (() => {
+  try {
+    const saved = localStorage.getItem('jetspan-palette');
+    if (saved && VINTAGE_PALETTES[saved]) return saved;
+  } catch (e) {}
+  return 'heatmap';
+})();
+THEMES.vintage.bandColors = VINTAGE_PALETTES[currentPalette].colors;
+
+// switch the engraved theme's colour ramp in place (no basemap reload):
+// re-skin chrome (TIME_BANDS + legend swatches), recolor the hex washes,
+// and refresh the wash-edge line colours to the new ramp.
+function setVintagePalette(name) {
+  if (!VINTAGE_PALETTES[name]) return;
+  currentPalette = name;
+  try { localStorage.setItem('jetspan-palette', name); } catch (e) {}
+  THEMES.vintage.bandColors = VINTAGE_PALETTES[name].colors;
+  if (currentTheme === 'vintage') {
+    applyThemeChrome('vintage');
+    if (map) {
+      recolorGrid();
+      // wash-edges paint expr was baked at layer-add time — rebake
+      if (map.getLayer('wash-edges')) {
+        map.setPaintProperty('wash-edges', 'line-color', bandColorMatchExpr());
+      }
+    }
+  }
+}
+
 // =============================================================================
 // TIME BANDS (colors come from the active theme; thresholds are theme-independent)
 // =============================================================================
@@ -1527,6 +1637,12 @@ function applyThemeChrome(name) {
   // theme select reflects state
   const sel = document.getElementById('theme-select');
   if (sel && sel.value !== name) sel.value = name;
+
+  // palette picker: only meaningful for the engraved theme
+  const palRow = document.getElementById('palette-row');
+  if (palRow) palRow.style.display = engraved ? '' : 'none';
+  const palSel = document.getElementById('palette-select');
+  if (palSel && palSel.value !== currentPalette) palSel.value = currentPalette;
 }
 
 // full theme switch at runtime: chrome + basemap swap + re-add app layers
@@ -1541,7 +1657,7 @@ function applyTheme(name) {
       for (const f of gridData.features) {
         f.properties.color = showOSRMCoverage
           ? (f.properties.osrm ? '#22c55e' : '#ef4444')
-          : getTimeBandColor(f.properties.travelTimeMinutes);
+          : getTimeBandColor(displayMinutes(f.properties));
       }
     }
     // setStyle wipes our sources/layers; re-add them once the new style loads.
@@ -1633,7 +1749,7 @@ function recolorGrid() {
       // red/green by OSRM coverage: green = OSRM used, red = haversine estimate
       f.properties.color = f.properties.osrm ? '#22c55e' : '#ef4444';
     } else {
-      f.properties.color = getTimeBandColor(f.properties.travelTimeMinutes);
+      f.properties.color = getTimeBandColor(displayMinutes(f.properties));
     }
   }
   map.getSource('hexgrid').setData(gridData);
@@ -1685,6 +1801,55 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
 // field:    hex centroids as weighted points for a heatmap layer
 // graticule: static 10-degree lat/long grid for the engraved look
 
+// -----------------------------------------------------------------------------
+// BAND SMOOTHING (engraved theme) — the raw per-hex times are speckled:
+// regional airports punch single-hex fast pockets into slower surroundings,
+// which renders as mottle/worm-pox in the flat colour washes. Smooth the
+// DISPLAY value with a 2-pass neighbour blur over the h3 lattice so the washes
+// read as broad radiating sweeps. The raw travelTimeMinutes is untouched —
+// tooltips, relief heights and the field weights keep the real data.
+// -----------------------------------------------------------------------------
+function smoothGridTimes(grid) {
+  if (!grid || !grid.features || !grid.features.length) return;
+  let vals = new Map();
+  for (const f of grid.features) {
+    vals.set(f.properties.h3Index, f.properties.travelTimeMinutes);
+  }
+  // 3 uniform passes: tuned visually 2026-07-04 — 2-pass/self-double still
+  // left speck-halos in Iberia + the Balkans; 3-pass melts them into sweeps
+  // while metro pockets (Paris, Madrid) survive as soft gradients
+  const PASSES = 3, SELF_WEIGHT = 1;
+  for (let p = 0; p < PASSES; p++) {
+    const next = new Map();
+    for (const [cell, t] of vals) {
+      let sum = t * SELF_WEIGHT, w = SELF_WEIGHT;
+      try {
+        for (const nb of h3.gridDisk(cell, 1)) {
+          if (nb === cell) continue;
+          const nt = vals.get(nb);
+          if (nt !== undefined) { sum += nt; w++; }
+        }
+      } catch (e) { /* pentagon/edge weirdness: keep own value */ }
+      next.set(cell, sum / w);
+    }
+    vals = next;
+  }
+  for (const f of grid.features) {
+    const s = vals.get(f.properties.h3Index);
+    f.properties.smoothTimeMinutes =
+      (s !== undefined) ? s : f.properties.travelTimeMinutes;
+  }
+}
+
+// minutes used for COLOURING a cell: smoothed in the engraved rendering
+// (clean washes), raw everywhere else (and always raw in tooltips)
+function displayMinutes(props) {
+  const rep = THEMES[currentTheme] && THEMES[currentTheme].representation;
+  return (rep === 'contours' && props.smoothTimeMinutes != null)
+    ? props.smoothTimeMinutes
+    : props.travelTimeMinutes;
+}
+
 // band index for a travel time under the current colorScale (0..9)
 function getBandIndex(totalMinutes) {
   const hours = totalMinutes / 60;
@@ -1705,10 +1870,11 @@ function buildContourGeoJSON() {
   const empty = { type: 'FeatureCollection', features: [] };
   if (!gridData || !gridData.features.length) return empty;
 
-  // bucket h3 indexes by band
+  // bucket h3 indexes by band — smoothed minutes so the isolines trace the
+  // same (de-speckled) band edges the colour washes show
   const buckets = TIME_BANDS.map(() => []);
   for (const f of gridData.features) {
-    buckets[getBandIndex(f.properties.travelTimeMinutes)].push(f.properties.h3Index);
+    buckets[getBandIndex(displayMinutes(f.properties))].push(f.properties.h3Index);
   }
 
   const features = [];
@@ -2417,6 +2583,16 @@ async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
   if (!gridData || gridData.features.length === 0) {
     // fallback for edge cases (no data loaded yet)
     gridData = { type: 'FeatureCollection', features: [] };
+  }
+
+  // smooth the display bands (computed for every theme so a later switch
+  // into the engraved theme has smoothTimeMinutes ready) + recolor the
+  // engraved washes from the smoothed values
+  smoothGridTimes(gridData);
+  if (THEMES[currentTheme].representation === 'contours' && !showOSRMCoverage) {
+    for (const f of gridData.features) {
+      f.properties.color = getTimeBandColor(f.properties.smoothTimeMinutes);
+    }
   }
 
   map.getSource('hexgrid').setData(gridData);
@@ -3326,6 +3502,11 @@ document.getElementById('color-scale').addEventListener('input', (e) => {
 // theme selector: full switch (chrome + basemap + layers)
 document.getElementById('theme-select').addEventListener('change', (e) => {
   applyTheme(e.target.value);
+});
+
+// palette selector (vintage only): in-place recolor, no basemap reload
+document.getElementById('palette-select').addEventListener('change', (e) => {
+  setVintagePalette(e.target.value);
 });
 
 // Initialize — apply saved/default theme chrome BEFORE the map spins up
