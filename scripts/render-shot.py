@@ -10,6 +10,7 @@ human in the loop.
 Usage:
   python3 scripts/render-shot.py --palette heatmap --view close --out /tmp/shot.png
   python3 scripts/render-shot.py --palette heatmap --view far   --out /tmp/shot.png
+  python3 scripts/render-shot.py --palette heatmap --linestyle contours --view close --out /tmp/shot.png
 
 Views (center/zoom tuned for the Bristol-origin isochrone over Europe):
   close = zoomed on UK/W-Europe (see the band texture + border conflict)
@@ -39,6 +40,8 @@ def port_open(p):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--palette", default="heatmap")
+    ap.add_argument("--linestyle", default=None,
+                    help="engraved line style: washes|contours|layered (default: app's persisted/default)")
     ap.add_argument("--view", default="close", choices=list(VIEWS))
     ap.add_argument("--out", required=True)
     ap.add_argument("--settle", type=float, default=6.0, help="seconds to wait after camera set")
@@ -69,11 +72,34 @@ def main():
             page.goto(f"http://127.0.0.1:{PORT}/isochrone.html", wait_until="networkidle", timeout=60000)
             # give the map object time to init
             page.wait_for_timeout(3000)
-            # set palette via the dropdown if present
-            try:
-                page.select_option("#palette-select", args.palette)
-            except Exception as e:
-                print(f"(palette select skipped: {e})", file=sys.stderr)
+            # drive a <select> by JS value + change event. The controls panel
+            # can be collapsed (selects hidden), which makes playwright's
+            # select_option wait forever on visibility — the app only listens
+            # for 'change', so a synthetic dispatch is equivalent.
+            def set_select(sel_id, value):
+                return page.evaluate(
+                    """([id, v]) => {
+                        const el = document.getElementById(id);
+                        if (!el) return 'missing:' + id;
+                        el.value = v;
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        return el.value;
+                    }""",
+                    [sel_id, value],
+                )
+            got = set_select("palette-select", args.palette)
+            if got != args.palette:
+                print(f"WARNING: palette select -> {got!r} (wanted {args.palette!r})", file=sys.stderr)
+            # verify the app actually took the line style — a silent no-op
+            # means blind renders
+            if args.linestyle:
+                got = set_select("linestyle-select", args.linestyle)
+                page.wait_for_timeout(1000)  # paint-prop settle
+                applied = page.evaluate(
+                    "() => (typeof currentLineStyle !== 'undefined') ? currentLineStyle : null")
+                if applied != args.linestyle:
+                    print(f"WARNING: linestyle did not apply (app has {applied!r}, wanted {args.linestyle!r})",
+                          file=sys.stderr)
             # jump camera
             page.evaluate(
                 """([lng, lat, zoom]) => {

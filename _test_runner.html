@@ -251,6 +251,10 @@ async function runTests() {
             'parseCellData', 'generateHexGridDirect', 'showTooltip',
             'loadChunksForViewport', 'getTimeBandColor', 'formatTime',
             'LOADED_ROUTE_TABLE', 'runTests', 'runBenchmark',
+            // engraved line-style system (bands-vs-borders separation)
+            'LINE_STYLES', 'setLineStyle', 'applyLineStylePaint',
+            'linestyle-select', 'country-borders-casing',
+            'jetspan-linestyle',
         ];
         for (const fn of required) {
             assert(html.includes(fn), fn + ' present');

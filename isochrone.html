@@ -761,6 +761,14 @@
           <option value="galton">Galton 1881</option>
         </select>
       </div>
+      <div class="toggle-row" id="linestyle-row">
+        <span>Line style</span>
+        <select class="theme-select" id="linestyle-select">
+          <option value="washes">Washes</option>
+          <option value="contours">Contours</option>
+          <option value="layered">Layered</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -1429,6 +1437,74 @@ const VINTAGE_PALETTES = {
   },
 };
 
+// -----------------------------------------------------------------------------
+// LINE STYLES (engraved theme) — how the band edges and the country borders
+// share the plate without fighting. The core problem: per-hex band strokes are
+// jagged zigzags at the same visual weight as the smooth admin borders, so the
+// two line systems read as one confused scribble. Each variant separates them
+// with a different treatment. Persisted in localStorage like the palette.
+// All values are PAINT deltas applied over the layers addAppSourcesAndLayers
+// creates — switching style never reloads the basemap.
+// -----------------------------------------------------------------------------
+const LINE_STYLES = {
+  // 1914-map look: bands are pure translucent colour washes, NO band strokes
+  // at all. Borders are the only linework over the colour — thin dark
+  // hairlines, instantly readable. Graticule muted to a whisper.
+  washes: {
+    label: 'Washes',
+    graticuleOpacity: 0.15,
+    washFillOpacity: 0.45,
+    washEdgeOpacity: 0,          // watercolour edge-pooling line: off
+    contourOpacity: 0,           // ink isolines: off — fills only
+    contourColorMode: 'ink',
+    contourWidth: ['case', ['get', 'major'], 1.0, 0.6],
+    border: {
+      color: 'rgba(72, 56, 36, 0.72)',
+      width: ['interpolate', ['linear'], ['zoom'], 1, 0.4, 4, 0.9, 8, 1.4],
+      dash: null,                // solid hairline
+      casing: false,
+    },
+  },
+  // isoline plate: bands are thin COLOURED rings (the ramp carried by the
+  // lines, near-transparent fill), borders switch language entirely — dashed
+  // grey — so ring-lines and border-lines can't be confused.
+  contours: {
+    label: 'Contours',
+    graticuleOpacity: 0.2,
+    washFillOpacity: 0.12,       // whisper of fill so regions stay legible
+    washEdgeOpacity: 0,
+    contourOpacity: 0.85,
+    contourColorMode: 'band',    // ring colour = its band's ramp colour
+    contourWidth: ['case', ['get', 'major'], 2.2, 1.5],
+    border: {
+      color: 'rgba(115, 112, 105, 0.6)',
+      width: ['interpolate', ['linear'], ['zoom'], 1, 0.5, 4, 1.1, 8, 1.8],
+      dash: [2, 2],              // dashed grey = a different line language
+      casing: false,
+    },
+  },
+  // layered plate: bands keep their faint hex texture + soft edges, and the
+  // borders get a light parchment CASING under a dark core line — a halo that
+  // lifts the border clear of whatever colour is beneath it.
+  layered: {
+    label: 'Layered',
+    graticuleOpacity: 0.3,
+    washFillOpacity: 0.42,
+    washEdgeOpacity: ['interpolate', ['linear'], ['zoom'], 2.2, 0, 3.0, 0.3],
+    contourOpacity: 0.3,
+    contourColorMode: 'ink',
+    contourWidth: ['case', ['get', 'major'], 1.0, 0.6],
+    border: {
+      color: 'rgba(56, 42, 24, 0.85)',
+      width: ['interpolate', ['linear'], ['zoom'], 1, 0.6, 4, 1.3, 8, 2.0],
+      dash: null,
+      casing: true,              // light halo layer under the dark core
+      casingColor: 'rgba(246, 239, 222, 0.85)',
+      casingWidth: ['interpolate', ['linear'], ['zoom'], 1, 2.0, 4, 3.6, 8, 5.5],
+    },
+  },
+};
+
 const THEMES = {
   // Antique cartography after Galton's 1881 Isochronic Passage Chart:
   // parchment base (sepia CSS filter on canvas) with soft TRANSLUCENT
@@ -1547,9 +1623,19 @@ let currentPalette = (() => {
 })();
 THEMES.vintage.bandColors = VINTAGE_PALETTES[currentPalette].colors;
 
+// active line style (engraved theme) — persisted, washes by default
+let currentLineStyle = (() => {
+  try {
+    const saved = localStorage.getItem('jetspan-linestyle');
+    if (saved && LINE_STYLES[saved]) return saved;
+  } catch (e) {}
+  return 'washes';
+})();
+
 // switch the engraved theme's colour ramp in place (no basemap reload):
 // re-skin chrome (TIME_BANDS + legend swatches), recolor the hex washes,
-// and refresh the wash-edge line colours to the new ramp.
+// and refresh the band-line colours to the new ramp (the line-style applier
+// owns every band-line + border paint prop, so it does the rebake).
 function setVintagePalette(name) {
   if (!VINTAGE_PALETTES[name]) return;
   currentPalette = name;
@@ -1559,11 +1645,49 @@ function setVintagePalette(name) {
     applyThemeChrome('vintage');
     if (map) {
       recolorGrid();
-      // wash-edges paint expr was baked at layer-add time — rebake
-      if (map.getLayer('wash-edges')) {
-        map.setPaintProperty('wash-edges', 'line-color', bandColorMatchExpr());
-      }
+      applyLineStylePaint(); // wash-edge/contour colour exprs were baked at add time
     }
+  }
+}
+
+// switch band-edge vs border treatment in place (engraved theme only)
+function setLineStyle(name) {
+  if (!LINE_STYLES[name]) return;
+  currentLineStyle = name;
+  try { localStorage.setItem('jetspan-linestyle', name); } catch (e) {}
+  const sel = document.getElementById('linestyle-select');
+  if (sel && sel.value !== name) sel.value = name;
+  if (currentTheme === 'vintage' && map) applyLineStylePaint();
+}
+
+// apply the active LINE_STYLES variant's paint onto the live engraved layers.
+// Uses opacity (not visibility) to hide layers — the grid show/hide toggle
+// flips visibility on all band layers, and must not resurrect hidden ones.
+function applyLineStylePaint() {
+  if (!map) return;
+  if ((THEMES[currentTheme].representation || 'hex') !== 'contours') return;
+  const LS = LINE_STYLES[currentLineStyle] || LINE_STYLES.washes;
+  const ink = THEMES[currentTheme].paint.ink || '#3a2c1a';
+  const setP = (layer, prop, val) => {
+    if (map.getLayer(layer)) map.setPaintProperty(layer, prop, val);
+  };
+  setP('graticule', 'line-opacity', LS.graticuleOpacity);
+  setP('wash-bands', 'fill-opacity', LS.washFillOpacity);
+  setP('wash-edges', 'line-opacity', LS.washEdgeOpacity);
+  setP('wash-edges', 'line-color', bandColorMatchExpr());
+  setP('contour-lines', 'line-opacity', LS.contourOpacity);
+  setP('contour-lines', 'line-width', LS.contourWidth);
+  setP('contour-lines', 'line-color',
+    LS.contourColorMode === 'band' ? bandColorMatchExpr() : ink);
+  // borders (+ casing halo) — layers exist only if the basemap exposes the
+  // openmaptiles boundary source
+  setP('country-borders', 'line-color', LS.border.color);
+  setP('country-borders', 'line-width', LS.border.width);
+  setP('country-borders', 'line-dasharray', LS.border.dash || [1, 0]);
+  setP('country-borders-casing', 'line-opacity', LS.border.casing ? 1 : 0);
+  if (LS.border.casing) {
+    setP('country-borders-casing', 'line-color', LS.border.casingColor);
+    setP('country-borders-casing', 'line-width', LS.border.casingWidth);
   }
 }
 
@@ -1638,11 +1762,15 @@ function applyThemeChrome(name) {
   const sel = document.getElementById('theme-select');
   if (sel && sel.value !== name) sel.value = name;
 
-  // palette picker: only meaningful for the engraved theme
+  // palette + line-style pickers: only meaningful for the engraved theme
   const palRow = document.getElementById('palette-row');
   if (palRow) palRow.style.display = engraved ? '' : 'none';
   const palSel = document.getElementById('palette-select');
   if (palSel && palSel.value !== currentPalette) palSel.value = currentPalette;
+  const lsRow = document.getElementById('linestyle-row');
+  if (lsRow) lsRow.style.display = engraved ? '' : 'none';
+  const lsSel = document.getElementById('linestyle-select');
+  if (lsSel && lsSel.value !== currentLineStyle) lsSel.value = currentLineStyle;
 }
 
 // full theme switch at runtime: chrome + basemap swap + re-add app layers
@@ -2435,6 +2563,24 @@ function addAppSourcesAndLayers() {
   // Add country borders on top of hex grid
   // Use the existing OpenMapTiles vector source from the base style
   if (map.getSource('openmaptiles')) {
+    // light casing halo UNDER the border line — the engraved 'layered' line
+    // style fades it in; every other style keeps it at opacity 0
+    addLayerOnce({
+      id: 'country-borders-casing',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'boundary',
+      filter: ['==', ['get', 'admin_level'], 2],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': 'rgba(246, 239, 222, 0.85)',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          1, 2.0, 4, 3.6, 8, 5.5
+        ],
+        'line-opacity': 0,
+      }
+    });
     addLayerOnce({
       id: 'country-borders',
       type: 'line',
@@ -2483,6 +2629,10 @@ function addAppSourcesAndLayers() {
 
   // fill the active representation's derived source from the cached grid
   refreshGridDerived();
+
+  // engraved theme: overlay the active line-style variant's paint (band-edge
+  // vs border treatment) on the freshly-added layers
+  applyLineStylePaint();
 
   // re-tune once the style settles — on some loads the first pass races the
   // basemap layers and paint overrides (landcover mute etc) don't stick
@@ -3507,6 +3657,11 @@ document.getElementById('theme-select').addEventListener('change', (e) => {
 // palette selector (vintage only): in-place recolor, no basemap reload
 document.getElementById('palette-select').addEventListener('change', (e) => {
   setVintagePalette(e.target.value);
+});
+
+// line-style selector (vintage only): in-place paint swap, no basemap reload
+document.getElementById('linestyle-select').addEventListener('change', (e) => {
+  setLineStyle(e.target.value);
 });
 
 // Initialize — apply saved/default theme chrome BEFORE the map spins up
