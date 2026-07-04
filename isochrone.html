@@ -2007,7 +2007,7 @@ async function initMap() {
     zoom: 2,
     pitch: THEMES[currentTheme].pitch || 0,
   });
-
+  window.map = map; // test/render hook: lets the headless render harness drive the camera
   // Projection is per-theme: globe by default, but the relief theme uses
   // mercator (fill-extrusion + globe is unreliable in MapLibre v5).
   map.on('style.load', () => {
