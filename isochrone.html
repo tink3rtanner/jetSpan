@@ -740,9 +740,9 @@
       <div class="slider-row">
         <div class="slider-header">
           <span>Color scale</span>
-          <span class="slider-value" id="color-scale-label">1.0×</span>
+          <span class="slider-value" id="color-scale-label">1.8×</span>
         </div>
-        <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1">
+        <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1.8">
       </div>
       <div class="toggle-row">
         <span>Style</span>
@@ -1366,17 +1366,22 @@ const VINTAGE_PALETTES = {
   // universal "cool = near, hot/dark = far" convention — DEFAULT
   heatmap: {
     label: 'Heat',
+    // RELAXED GREEN-TINTED, MONOTONIC (RdYlGn_r lineage): near = green, a whole
+    // continent stays green→yellow, only genuinely far goes orange→red, and the
+    // farthest (other side of the world) goes deep maroon — NEVER blue/purple in
+    // the middle. Green-heavy at the near end + colorScale default 1.8 keeps most
+    // of Europe green/yellow from Bristol (josh 2026-07-06).
     colors: [
-      '#157f3b', // < 2h    green (fast)
-      '#6fa621', // 2-4h    yellow-green
-      '#d8c81e', // 4-6h    yellow
-      '#e89a12', // 6-8h    amber
-      '#e05f10', // 8-10h   orange
-      '#d42a1e', // 10-12h  red
-      '#a8161f', // 12-14h  dark red
-      '#7a1030', // 14-18h  maroon
-      '#4a0d3d', // 18-24h  deep purple
-      '#1e0a2e', // 24h+    near-black purple (slowest)
+      '#1a9850', // band 1  vivid green (fast)
+      '#66bd63', // band 2  green
+      '#a6d96a', // band 3  yellow-green
+      '#d9ef8b', // band 4  pale yellow-green
+      '#fee08b', // band 5  yellow
+      '#fdae61', // band 6  amber
+      '#f46d43', // band 7  orange
+      '#d73027', // band 8  red
+      '#a50026', // band 9  dark red
+      '#5c0a12', // band 10 near-black maroon (slowest / antipodal)
     ],
   },
   // single-hue light→dark: darker = farther. Sepia-cohesive with parchment.
@@ -1707,8 +1712,11 @@ const TIME_BANDS = [
   { maxHours: Infinity, color: '#1e1b4b', label: '24h+' },
 ];
 
-// color scale: multiplier on band thresholds (higher = more green)
-let colorScale = 1.0;
+// color scale: multiplier on band thresholds (higher = more green / more relaxed).
+// Default 1.8 (was 1.0) so most of Europe reads green→yellow from Bristol and only
+// intercontinental distances go orange→red (josh 2026-07-06: "more relaxed scaling
+// so most of Europe is green light green maybe yellow ... red when other side of world").
+let colorScale = 1.8;
 
 // =============================================================================
 // THEME ENGINE
