@@ -1,0 +1,13 @@
+
+=== res 3 (15,633 cells) ===
+  smoothGridTimes:        354.5 ms  (328,278 gridDisk calls)
+  recolor (getBandIndex): 2.2 ms
+  dissolve NON-cumulative:143.6 ms  (9 band-dissolves, each band once)
+
+=== res 4 (109,470 cells) ===
+  smoothGridTimes:        1866.5 ms  (2,298,855 gridDisk calls)
+  recolor (getBandIndex): 6.3 ms
+  dissolve NON-cumulative:613.2 ms  (9 band-dissolves, each band once)
+
+--- single full-set dissolve, res 3 (15,633 cells) — the cumulative loop's worst step ---
+[exit 124]

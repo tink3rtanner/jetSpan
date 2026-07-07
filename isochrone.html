@@ -2014,14 +2014,21 @@ function buildContourGeoJSON() {
   }
 
   const features = [];
-  let cumulative = [];
+  // PERF (2026-07-07): dissolve each band's OWN cells, NOT the cumulative set.
+  // The old code dissolved cells[0..i] combined, so the outer bands dissolved a
+  // near-complete, globe-spanning hex set in one cellsToMultiPolygon call — and h3's
+  // dissolve is super-linear on scattered/multi-component sets: benchmarked >5 min for
+  // a single 15k-cell full-set dissolve, >40 min (never finished) for the full
+  // cumulative build. THAT was the world-zoom browser freeze. Per-band is 0.6s @109k /
+  // 0.14s @15k. The layer strokes isolines (contour-lines, a LINE layer), so per-band
+  // annulus edges overdraw the cumulative isolines identically — visually ~equivalent.
+  // (Verify the isolines on a GPU browser; the pi can't render the globe.)
   // skip the last (Infinity) band — its "contour" is just the data footprint
   for (let i = 0; i < TIME_BANDS.length - 1; i++) {
-    cumulative = cumulative.concat(buckets[i]);
-    if (!cumulative.length) continue;
+    if (!buckets[i].length) continue;
     try {
       // h3 v4: cellsToMultiPolygon(cells, formatAsGeoJson) -> [lng,lat] loops
-      let mp = h3.cellsToMultiPolygon(cumulative, true);
+      let mp = h3.cellsToMultiPolygon(buckets[i], true);
       if (!mp || !mp.length) continue;
       // de-noise: drop tiny island polygons (outer ring < ~4 hexes) and tiny holes
       mp = mp
@@ -2121,7 +2128,12 @@ function getResolutionForZoom(zoom) {
   // all resolutions precomputed: res 1-4 in base JSON, res 5-6 lazy-loaded chunks
   if (zoom < 1) return 1;       // far globe: res 1
   if (zoom < 2) return 2;       // globe: res 2
-  if (zoom < 4.5) return 4;     // regional: res 4 (res 3 skipped — too coarse)
+  if (zoom < 3) return 3;       // world view: res 3 (15k cells). PERF (2026-07-07):
+                                 // res 4 here is 109k cells un-clipped (no viewport gate
+                                 // until z>=3) — the smoothing (1.9s) + dissolve (the
+                                 // freeze) cost bomb. You can't see res-4 detail zoomed
+                                 // this far out anyway, so res 3 is 7x cheaper for free.
+  if (zoom < 4.5) return 4;     // regional: res 4, clipped to viewport bounds (z>=3 gate)
   if (zoom < 6.5) return 5;     // local: res 5 (chunked)
   return 6;                      // street: res 6 (chunked)
 }
@@ -3649,10 +3661,24 @@ document.getElementById('toggle-osrm').addEventListener('change', (e) => {
 });
 
 // color scale slider: recolor grid + update legend on change
+// PERF (2026-07-07): recolorGrid() rebuilds the contour dissolve — far too heavy to run
+// on every drag `input` tick (was ~60/sec). Update colorScale + the label instantly, but
+// debounce the heavy recolor to a trailing ~120ms during the drag, and run one final
+// authoritative pass on `change` (drag release). Same computation, just throttled.
+let _colorScaleTimer = null;
 document.getElementById('color-scale').addEventListener('input', (e) => {
   colorScale = parseFloat(e.target.value);
   document.getElementById('color-scale-label').textContent =
     colorScale.toFixed(1) + '×';
+  if (_colorScaleTimer) clearTimeout(_colorScaleTimer);
+  _colorScaleTimer = setTimeout(() => {
+    _colorScaleTimer = null;
+    recolorGrid();
+    updateLegend();
+  }, 120);
+});
+document.getElementById('color-scale').addEventListener('change', () => {
+  if (_colorScaleTimer) { clearTimeout(_colorScaleTimer); _colorScaleTimer = null; }
   recolorGrid();
   updateLegend();
 });
