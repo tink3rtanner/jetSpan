@@ -13,3 +13,4 @@ __pycache__/
 # editor
 *.swp
 *.swo
+node_modules/
