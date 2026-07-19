@@ -744,22 +744,14 @@
         </div>
         <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1.8">
       </div>
-      <div class="toggle-row">
-        <span>Style</span>
-        <select class="theme-select" id="theme-select">
-          <option value="vintage">Vintage</option>
-          <option value="modern">Modern</option>
-          <option value="dark">Dark</option>
-        </select>
-      </div>
       <div class="toggle-row" id="preset-row">
-        <span>Preset</span>
+        <span>Style</span>
         <select class="theme-select" id="preset-select">
-          <option value="custom">Custom</option>
           <option value="bold-heat">Bold wash</option>
           <option value="ink-heat">Ink isolines</option>
           <option value="verdigris">Verdigris</option>
           <option value="hypso">Hypsometric</option>
+          <option value="custom">Custom</option>
         </select>
       </div>
       <div class="toggle-row" id="palette-row">
@@ -1696,14 +1688,12 @@ const THEMES = {
   },
 };
 
-// active theme — persisted in localStorage, vintage by default
-let currentTheme = (() => {
-  try {
-    const saved = localStorage.getItem('jetspan-theme');
-    if (saved && THEMES[saved]) return saved;
-  } catch (e) {}
-  return 'vintage';
-})();
+// theme is LOCKED to the engraved vintage plate — modern/dark retired from the
+// UI 2026-07-19 (josh: the four style presets ARE the styles). THEMES keeps
+// their defs, but a stale localStorage 'jetspan-theme' must not resurrect
+// them (it would hide the style/colours/line-style rows entirely).
+let currentTheme = 'vintage';
+try { localStorage.setItem('jetspan-theme', 'vintage'); } catch (e) {}
 
 // active vintage palette — persisted in localStorage, heatmap by default
 let currentPalette = (() => {
@@ -1715,13 +1705,14 @@ let currentPalette = (() => {
 })();
 THEMES.vintage.bandColors = VINTAGE_PALETTES[currentPalette].colors;
 
-// active line style (engraved theme) — persisted, washes by default
+// active line style (engraved theme) — persisted, boldwash by default so a
+// fresh load lands on the "Bold wash" style preset (heatmap+boldwash)
 let currentLineStyle = (() => {
   try {
     const saved = localStorage.getItem('jetspan-linestyle');
     if (saved && LINE_STYLES[saved]) return saved;
   } catch (e) {}
-  return 'washes';
+  return 'boldwash';
 })();
 
 // switch the engraved theme's colour ramp in place (no basemap reload):
@@ -3794,11 +3785,6 @@ document.getElementById('color-scale').addEventListener('change', () => {
   if (_colorScaleTimer) { clearTimeout(_colorScaleTimer); _colorScaleTimer = null; }
   recolorGrid();
   updateLegend();
-});
-
-// theme selector: full switch (chrome + basemap + layers)
-document.getElementById('theme-select').addEventListener('change', (e) => {
-  applyTheme(e.target.value);
 });
 
 // preset selector (vintage only): applies a curated palette+linestyle pair.
