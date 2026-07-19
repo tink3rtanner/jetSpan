@@ -769,6 +769,46 @@
     body.theme-vintage .maplibregl-ctrl-group button + button {
       border-top: 1px solid rgba(107, 86, 56, 0.35);
     }
+
+    @media (max-width: 600px) {
+      body { overflow: hidden; }
+
+      .title-panel {
+        right: 16px;
+        padding: 12px 16px;
+      }
+      .title-panel h1 {
+        max-width: calc(100% - 34px);
+        font-size: 17px;
+      }
+      .title-panel .subtitle { max-width: calc(100% - 28px); }
+
+      .info-panel {
+        left: 16px;
+        right: 16px;
+        min-width: 0;
+        max-height: calc(100% - 92px);
+        overflow-y: auto;
+      }
+      .tooltip {
+        left: 16px;
+        right: 16px;
+        min-width: 0;
+        max-width: none;
+      }
+      .pin-cards {
+        left: 16px;
+        right: 16px;
+        width: auto;
+      }
+      .methods-footer {
+        width: calc(100% - 16px);
+        padding: 2px 6px;
+        white-space: normal;
+        font-size: 10px;
+        line-height: 1.15;
+      }
+    }
   </style>
 </head>
 <body class="theme-vintage">
@@ -952,6 +992,8 @@ let LOADED_ROUTE_TABLE = null;
 
 // chunk loading state: track which parent cells have been fetched per resolution
 const loadedChunks = { 5: new Set(), 6: new Set() };
+const loadedChunkData = { 5: new Map(), 6: new Map() };
+const baseResolutionParentIndex = new Map();
 let _chunkLoadingInProgress = false;
 
 async function loadJetSpanData() {
@@ -1026,13 +1068,29 @@ function getVisibleParentCells(bounds, parentRes) {
       }
     }
   }
-  return [...cells];
+  // Sampling points can sit just to one side of an H3 boundary even when the
+  // neighbouring parent overlaps the viewport. Include one coarse neighbour
+  // ring so chunk loading and indexed rendering never clip that thin fringe.
+  const expanded = new Set(cells);
+  for (const cell of cells) {
+    try {
+      for (const neighbour of h3.gridDisk(cell, 1)) expanded.add(neighbour);
+    } catch (e) {
+      // A pentagon distortion should not discard the parents already found.
+    }
+  }
+  return [...expanded];
 }
 
 // fetch and decompress a gzipped JSON file (chunks stored as .json.gz to save repo space)
+// A missing file is an expected empty/ocean parent on static hosting. Distinguish
+// that stable 404 from transient failures so revisiting a viewport does not issue
+// the same guaranteed-to-fail request forever.
+const MISSING_CHUNK = Symbol('missing-chunk');
 async function fetchGzipJSON(url) {
   const res = await fetch(url, {cache: 'no-cache'});
-  if (!res.ok) return null;
+  if (res.status === 404) return MISSING_CHUNK;
+  if (!res.ok) throw new Error(`chunk fetch failed: ${res.status}`);
   const ds = new DecompressionStream('gzip');
   const stream = res.body.pipeThrough(ds);
   return new Response(stream).json();
@@ -1071,10 +1129,14 @@ async function loadChunksForViewport(resolution, bounds) {
     const resData = LOADED_ISOCHRONE.resolutions[String(resolution)];
     let loadedCells = 0;
     results.forEach((data, i) => {
-      if (data) {
+      if (data === MISSING_CHUNK) {
+        loadedChunks[resolution].add(toFetch[i]); // negative-cache stable static 404s
+        loadedChunkData[resolution].set(toFetch[i], null);
+      } else if (data) {
         Object.assign(resData, data);
         loadedCells += Object.keys(data).length;
         loadedChunks[resolution].add(toFetch[i]); // only mark loaded on success
+        loadedChunkData[resolution].set(toFetch[i], data);
       }
       // failed chunks NOT marked — will retry on next viewport update
     });
@@ -1227,7 +1289,6 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
   }
 
   const features = [];
-  const cells = Object.keys(resData);
   let inViewport = 0;
   let outViewport = 0;
 
@@ -1242,6 +1303,40 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
     east: Math.min(180, bounds.east + lngPad),
     west: Math.max(-180, bounds.west - lngPad),
   };
+
+  // Restrict iteration to coarse H3 parents intersecting the padded viewport.
+  // Previously lazy resolutions accumulated a flat world-wide object, so every
+  // later pan scanned all cells ever visited before discarding nearly all of
+  // them. The static chunk files already provide the ideal parent index.
+  let cells;
+  if (viewportBounds && resolution >= 5 && loadedChunkData[resolution]) {
+    const parentRes = resolution === 5 ? 1 : 2;
+    const parents = getVisibleParentCells(padded, parentRes);
+    cells = [];
+    for (const parent of parents) {
+      const chunk = loadedChunkData[resolution].get(parent);
+      if (chunk) cells.push(...Object.keys(chunk));
+    }
+  } else if (viewportBounds && resolution === 4) {
+    let index = baseResolutionParentIndex.get(4);
+    if (!index) {
+      index = new Map();
+      for (const cell of Object.keys(resData)) {
+        const parent = h3.cellToParent(cell, 2);
+        if (!index.has(parent)) index.set(parent, []);
+        index.get(parent).push(cell);
+      }
+      baseResolutionParentIndex.set(4, index);
+    }
+    const parents = getVisibleParentCells(padded, 2);
+    cells = [];
+    for (const parent of parents) {
+      const indexed = index.get(parent);
+      if (indexed) cells.push(...indexed);
+    }
+  } else {
+    cells = Object.keys(resData);
+  }
 
   for (const h3Index of cells) {
     try {
@@ -1852,7 +1947,7 @@ function setVintagePalette(name) {
   if (currentTheme === 'vintage') {
     applyThemeChrome('vintage');
     if (map) {
-      recolorGrid();
+      recolorGrid({ refreshDerived: false });
       applyLineStylePaint(); // wash-edge/contour colour exprs were baked at add time
     }
   }
@@ -2116,7 +2211,7 @@ function getTimeBandColor(totalMinutes) {
 }
 
 // recolor existing grid features without regenerating geometry
-function recolorGrid() {
+function recolorGrid({ refreshDerived = true } = {}) {
   if (!gridData || !map) return;
   for (const f of gridData.features) {
     if (showOSRMCoverage) {
@@ -2127,7 +2222,7 @@ function recolorGrid() {
     }
   }
   map.getSource('hexgrid').setData(gridData);
-  refreshGridDerived(); // colorScale moves band thresholds + field weights
+  if (refreshDerived) refreshGridDerived(); // colorScale moves band thresholds + field weights
 }
 
 // update legend labels to reflect current color scale
@@ -2185,33 +2280,46 @@ function generateHexGrid(origin, resolution = 4, viewportBounds = null) {
 // -----------------------------------------------------------------------------
 function smoothGridTimes(grid) {
   if (!grid || !grid.features || !grid.features.length) return;
-  let vals = new Map();
-  for (const f of grid.features) {
-    vals.set(f.properties.h3Index, f.properties.travelTimeMinutes);
+  const features = grid.features;
+  const indexByCell = new Map();
+  let values = new Float64Array(features.length);
+  for (let i = 0; i < features.length; i++) {
+    indexByCell.set(features[i].properties.h3Index, i);
+    values[i] = features[i].properties.travelTimeMinutes;
+  }
+
+  // H3 neighbour discovery is much more expensive than the averaging itself.
+  // The old loop called gridDisk three times per cell (once per smoothing pass).
+  // Resolve visible neighbour indexes once and reuse them for every pass.
+  const neighbors = new Array(features.length);
+  for (let i = 0; i < features.length; i++) {
+    const cell = features[i].properties.h3Index;
+    const indexes = [];
+    try {
+      for (const neighbor of h3.gridDisk(cell, 1)) {
+        if (neighbor === cell) continue;
+        const index = indexByCell.get(neighbor);
+        if (index !== undefined) indexes.push(index);
+      }
+    } catch (e) { /* pentagon/edge weirdness: keep own value */ }
+    neighbors[i] = indexes;
   }
   // 3 uniform passes: tuned visually 2026-07-04 — 2-pass/self-double still
   // left speck-halos in Iberia + the Balkans; 3-pass melts them into sweeps
   // while metro pockets (Paris, Madrid) survive as soft gradients
   const PASSES = 3, SELF_WEIGHT = 1;
   for (let p = 0; p < PASSES; p++) {
-    const next = new Map();
-    for (const [cell, t] of vals) {
-      let sum = t * SELF_WEIGHT, w = SELF_WEIGHT;
-      try {
-        for (const nb of h3.gridDisk(cell, 1)) {
-          if (nb === cell) continue;
-          const nt = vals.get(nb);
-          if (nt !== undefined) { sum += nt; w++; }
-        }
-      } catch (e) { /* pentagon/edge weirdness: keep own value */ }
-      next.set(cell, sum / w);
+    const next = new Float64Array(features.length);
+    for (let i = 0; i < features.length; i++) {
+      let sum = values[i] * SELF_WEIGHT;
+      const adjacent = neighbors[i];
+      for (let j = 0; j < adjacent.length; j++) sum += values[adjacent[j]];
+      next[i] = sum / (SELF_WEIGHT + adjacent.length);
     }
-    vals = next;
+    values = next;
   }
-  for (const f of grid.features) {
-    const s = vals.get(f.properties.h3Index);
-    f.properties.smoothTimeMinutes =
-      (s !== undefined) ? s : f.properties.travelTimeMinutes;
+  for (let i = 0; i < features.length; i++) {
+    features[i].properties.smoothTimeMinutes = values[i];
   }
 }
 
@@ -2383,7 +2491,10 @@ let currentOrigin = 'bristol';
 let gridData = null;
 let currentResolution = 3;
 let isUpdatingGrid = false;
+let pendingGridUpdate = null;
 let showOSRMCoverage = false;  // toggle: red/green hexes by OSRM coverage
+const gridPerfTrace = [];
+window.getJetSpanPerfTrace = () => gridPerfTrace.slice();
 
 function getResolutionForZoom(zoom) {
   // all resolutions precomputed: res 1-4 in base JSON, res 5-6 lazy-loaded chunks
@@ -2576,7 +2687,10 @@ async function initMap() {
         const zoomDiff = Math.abs(zoom - lastZoom);
         const centerDiff = Math.abs(center.lng - lastCenter.lng) + Math.abs(center.lat - lastCenter.lat);
         // Skip for tiny movements (< 0.5 degree pan and < 0.3 zoom change)
-        if (centerDiff < 0.5 && zoomDiff < 0.3) {
+        // A tiny zoom can still cross an H3 threshold (for example 6.45→6.55).
+        // Never suppress that transition or the map keeps rendering the old
+        // resolution until the user makes a second, larger movement.
+        if (centerDiff < 0.5 && zoomDiff < 0.3 && newResolution === currentResolution) {
           return;
         }
       }
@@ -2584,13 +2698,10 @@ async function initMap() {
       lastZoom = zoom;
 
       // Regenerate grid when viewport changes (pan or zoom)
-      if (!isUpdatingGrid) {
-        clearTimeout(moveDebounceTimer);
-        moveDebounceTimer = setTimeout(() => {
-          currentResolution = newResolution;
-          updateGrid(newResolution, false); // Don't fly to origin
-        }, 350); // Debounce to reduce rapid re-renders during pan/zoom
-      }
+      clearTimeout(moveDebounceTimer);
+      moveDebounceTimer = setTimeout(() => {
+        updateGrid(newResolution, false); // Don't fly to origin
+      }, 350); // Debounce to reduce rapid re-renders during pan/zoom
     });
 
     // Generate initial grid
@@ -3128,8 +3239,15 @@ function generateOriginGeoJSON() {
 }
 
 async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
-  if (isUpdatingGrid) return;
+  // A moveend can arrive while chunk loading or geometry generation is active.
+  // Keep only the newest requested viewport instead of silently dropping it.
+  if (isUpdatingGrid) {
+    pendingGridUpdate = { resolution, flyToOrigin };
+    return;
+  }
   isUpdatingGrid = true;
+  const perfStarted = performance.now();
+  const perfEntry = { resolution, zoom: map ? +map.getZoom().toFixed(2) : null };
 
   // only show loading overlay for major changes (origin switch), not for pan/zoom
   const showLoading = flyToOrigin;
@@ -3159,11 +3277,15 @@ async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
 
   // for chunked resolutions (5-6), load needed chunks before rendering
   if (resolution >= 5 && LOADED_ISOCHRONE && viewportBounds) {
+    const chunkStarted = performance.now();
     await loadChunksForViewport(resolution, viewportBounds);
+    perfEntry.chunkLoadMs = +(performance.now() - chunkStarted).toFixed(1);
   }
 
   // render: direct from precomputed data at all resolutions
+  const gridStarted = performance.now();
   gridData = generateHexGridDirect(origin, resolution, viewportBounds);
+  perfEntry.gridMs = +(performance.now() - gridStarted).toFixed(1);
   if (!gridData || gridData.features.length === 0) {
     // fallback for edge cases (no data loaded yet)
     gridData = { type: 'FeatureCollection', features: [] };
@@ -3172,16 +3294,23 @@ async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
   // smooth the display bands (computed for every theme so a later switch
   // into the engraved theme has smoothTimeMinutes ready) + recolor the
   // engraved washes from the smoothed values
+  const smoothStarted = performance.now();
   smoothGridTimes(gridData);
+  perfEntry.smoothMs = +(performance.now() - smoothStarted).toFixed(1);
   if (THEMES[currentTheme].representation === 'contours' && !showOSRMCoverage) {
     for (const f of gridData.features) {
       f.properties.color = getTimeBandColor(f.properties.smoothTimeMinutes);
     }
   }
 
+  const sourceStarted = performance.now();
   map.getSource('hexgrid').setData(gridData);
   map.getSource('origin').setData(generateOriginGeoJSON());
+  perfEntry.sourceSetMs = +(performance.now() - sourceStarted).toFixed(1);
+  const derivedStarted = performance.now();
   refreshGridDerived(); // contours/field track every grid change
+  perfEntry.derivedMs = +(performance.now() - derivedStarted).toFixed(1);
+  perfEntry.cells = gridData.features.length;
 
   // update stats
   document.getElementById('stat-cells').textContent = gridData.features.length.toLocaleString();
@@ -3202,7 +3331,16 @@ async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
   if (showLoading) {
     document.getElementById('loading').classList.add('hidden');
   }
+  perfEntry.totalMs = +(performance.now() - perfStarted).toFixed(1);
+  gridPerfTrace.push(perfEntry);
+  if (gridPerfTrace.length > 250) gridPerfTrace.splice(0, gridPerfTrace.length - 250);
+  console.log('[PERF] updateGrid', perfEntry);
   isUpdatingGrid = false;
+  if (pendingGridUpdate) {
+    const next = pendingGridUpdate;
+    pendingGridUpdate = null;
+    queueMicrotask(() => updateGrid(next.resolution, next.flyToOrigin));
+  }
 }
 
 // =============================================================================
@@ -3436,7 +3574,7 @@ async function runTests() {
   // === 2. RESOLUTION MAPPING ===
   show('\n─── 2. Resolution Mapping ───');
   const expectedRes = [
-    [0.5, 1], [1.5, 2], [2.5, 4], [3.5, 4], [4.5, 5], [5.5, 5], [7, 6],
+    [0.5, 1], [1.5, 2], [2.5, 3], [3.5, 4], [4.5, 5], [5.5, 5], [7, 6],
   ];
   for (const [z, expected] of expectedRes) {
     const got = getResolutionForZoom(z);
@@ -3456,6 +3594,8 @@ async function runTests() {
       north: bounds.getNorth(), south: bounds.getSouth(),
       east: bounds.getEast(), west: bounds.getWest()
     } : null;
+
+    if (res >= 5 && vb) await loadChunksForViewport(res, vb);
 
     const grid = generateHexGridDirect(origin, res, vb);
     const cells = grid ? grid.features.length : 0;
@@ -4307,7 +4447,9 @@ document.getElementById('toggle-grid').addEventListener('change', (e) => {
 
 document.getElementById('toggle-osrm').addEventListener('change', (e) => {
   showOSRMCoverage = e.target.checked;
-  recolorGrid();
+  // Coverage changes feature colours, not time-band membership. Rebuilding the
+  // H3 contour dissolve here is wasted work and blocks the main thread.
+  recolorGrid({ refreshDerived: false });
 });
 
 // color scale slider: recolor grid + update legend on change

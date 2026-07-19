@@ -13,6 +13,16 @@ python -m http.server 8765
 
 no build step. all deps loaded via CDN (MapLibre GL JS v5, H3-js v4.1).
 
+## Testing and performance
+
+- Open `_test_runner.html` for the standalone data/page suite.
+- Run `await runTests()` in the map console for rendering, zoom, pan, chunk, color, and interaction tests.
+- Open `_benchmark_runner.html` for the comprehensive visual journey and downloadable JSON report.
+- Run `node scripts/run-interaction-bench.mjs --label local` for an automated Mac/Chromium report; add
+  `--compare path/to/baseline.json` to print revision deltas.
+
+See `docs/PERFORMANCE.md` for scenario coverage and comparison guidance.
+
 ## How It Works
 
 ### System Overview
