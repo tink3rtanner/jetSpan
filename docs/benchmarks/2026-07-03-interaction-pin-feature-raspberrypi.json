@@ -1,0 +1,92 @@
+{
+  "kind": "interaction-bench",
+  "timestamp": "2026-07-03T16:09:43.637Z",
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.0 Safari/537.36",
+  "devicePixelRatio": 1,
+  "viewport": {
+    "w": 1280,
+    "h": 800
+  },
+  "postMs": 1400,
+  "results": [
+    {
+      "frames": 3,
+      "durationMs": 1617,
+      "fps": 1.9,
+      "avgFrameMs": 538.87,
+      "medianFrameMs": 433.3,
+      "p95FrameMs": 766.6,
+      "maxFrameMs": 766.6,
+      "jankPct": 100,
+      "longTasks": 7,
+      "longTaskTotalMs": 2446,
+      "scenario": "pan-continuous-z4"
+    },
+    {
+      "frames": 8,
+      "durationMs": 4800,
+      "fps": 1.7,
+      "avgFrameMs": 599.97,
+      "medianFrameMs": 600,
+      "p95FrameMs": 716.6,
+      "maxFrameMs": 716.6,
+      "jankPct": 100,
+      "longTasks": 10,
+      "longTaskTotalMs": 4700,
+      "scenario": "pan-continuous-z6"
+    },
+    {
+      "frames": 13,
+      "durationMs": 6900,
+      "fps": 1.9,
+      "avgFrameMs": 530.75,
+      "medianFrameMs": 550,
+      "p95FrameMs": 966.6,
+      "maxFrameMs": 966.6,
+      "jankPct": 100,
+      "longTasks": 13,
+      "longTaskTotalMs": 6147,
+      "scenario": "zoom-in-out"
+    },
+    {
+      "frames": 10,
+      "durationMs": 31032,
+      "fps": 0.3,
+      "avgFrameMs": 3103.2,
+      "medianFrameMs": 1316.6,
+      "p95FrameMs": 13416.2,
+      "maxFrameMs": 13416.2,
+      "jankPct": 100,
+      "longTasks": 17,
+      "longTaskTotalMs": 29304,
+      "scenario": "rotate-globe"
+    },
+    {
+      "frames": 8,
+      "durationMs": 6750,
+      "fps": 1.2,
+      "avgFrameMs": 843.71,
+      "medianFrameMs": 850,
+      "p95FrameMs": 1599.9,
+      "maxFrameMs": 1599.9,
+      "jankPct": 100,
+      "longTasks": 10,
+      "longTaskTotalMs": 7552,
+      "scenario": "bearing-spin-z5"
+    },
+    {
+      "frames": 117,
+      "durationMs": 17633,
+      "fps": 6.6,
+      "avgFrameMs": 150.71,
+      "medianFrameMs": 16.7,
+      "p95FrameMs": 1016.7,
+      "maxFrameMs": 1950,
+      "jankPct": 18.8,
+      "longTasks": 29,
+      "longTaskTotalMs": 15477,
+      "scenario": "pin-interaction"
+    }
+  ],
+  "machine": "raspberrypi"
+}

@@ -345,6 +345,97 @@
       padding: 4px 0;
     }
 
+    /* Pinned destination cards (click-to-pin) — stack on the right, below info btn */
+    .pin-cards {
+      position: absolute;
+      top: 64px;
+      right: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 110;
+      width: 300px;
+      max-height: calc(100% - 200px);
+      overflow-y: auto;
+      pointer-events: none; /* container transparent to map drags... */
+    }
+
+    .pin-card {
+      pointer-events: auto; /* ...but cards themselves are interactive */
+      background: rgba(10, 10, 10, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 12px 14px;
+      border: 1px solid rgba(251, 191, 36, 0.5); /* gold — matches pinned hex outline */
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+
+    .pin-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+
+    .pin-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .pin-card-title .pin-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .pin-card-time {
+      font-size: 17px;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .pin-card-close {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+      flex-shrink: 0;
+    }
+
+    .pin-card-close:hover {
+      color: #fff;
+    }
+
+    .pin-card .tooltip-breakdown {
+      padding: 8px 10px;
+    }
+
+    .pin-card .breakdown-row {
+      padding: 4px 0;
+      font-size: 12px;
+    }
+
+    .pin-cards-hint {
+      pointer-events: none;
+      font-size: 11px;
+      color: #999;
+      text-align: center;
+      align-self: flex-end;
+      background: rgba(10, 10, 10, 0.8);
+      border-radius: 6px;
+      padding: 3px 8px;
+    }
+
     /* Loading overlay */
     .loading-overlay {
       position: absolute;
@@ -792,6 +883,9 @@
     <div class="legend-item"><div class="legend-color" style="background: #4c1d95;"></div> 18-24 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #1e1b4b;"></div> 24+ hours</div>
   </div>
+
+  <!-- Pinned destination cards (click a hex to pin it) -->
+  <div class="pin-cards" id="pin-cards"></div>
 
   <!-- Tooltip -->
   <div class="tooltip" id="tooltip">
@@ -2271,6 +2365,76 @@ async function initMap() {
   map.on('load', () => {
     addAppSourcesAndLayers();
 
+    // Pinned destination hexes (click-to-pin) — separate sources so pins
+    // survive grid regeneration on pan/zoom/resolution changes
+    map.addSource('pinned-cells', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+    map.addSource('pinned-routes', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+
+    // pinned route: solid gold flight legs (distinct from white hover route)
+    map.addLayer({
+      id: 'pinned-route-flights',
+      type: 'line',
+      source: 'pinned-routes',
+      filter: ['==', ['get', 'segment'], 'flight'],
+      paint: {
+        'line-color': '#fbbf24',
+        'line-width': 2.5,
+        'line-opacity': 0.9
+      }
+    });
+
+    // pinned route: dashed gold ground segments
+    map.addLayer({
+      id: 'pinned-route-ground',
+      type: 'line',
+      source: 'pinned-routes',
+      filter: ['==', ['get', 'segment'], 'ground'],
+      paint: {
+        'line-color': '#fbbf24',
+        'line-width': 2,
+        'line-opacity': 0.65,
+        'line-dasharray': [4, 3]
+      }
+    });
+
+    // pinned hex: brightened fill + dark casing + bold gold outline
+    // (casing gives contrast against both light basemap and colored cells)
+    map.addLayer({
+      id: 'pinned-cells-fill',
+      type: 'fill',
+      source: 'pinned-cells',
+      paint: {
+        'fill-color': ['get', 'color'],
+        'fill-opacity': 0.75
+      }
+    });
+    map.addLayer({
+      id: 'pinned-cells-casing',
+      type: 'line',
+      source: 'pinned-cells',
+      paint: {
+        'line-color': '#1a1a1a',
+        'line-width': 6,
+        'line-opacity': 0.75
+      }
+    });
+    map.addLayer({
+      id: 'pinned-cells-outline',
+      type: 'line',
+      source: 'pinned-cells',
+      paint: {
+        'line-color': '#fbbf24',
+        'line-width': 3,
+        'line-opacity': 1
+      }
+    });
+
     // Interaction
     // (these delegated per-layer handlers survive setStyle/theme switches —
     // maplibre resolves the layer id at event time)
@@ -2291,8 +2455,20 @@ async function initMap() {
 
     map.on('mouseleave', 'hexgrid-fill', () => {
       hideTooltip();
+      map.getCanvas().style.cursor = '';
       // clear route line
       map.getSource('route-line').setData({ type: 'FeatureCollection', features: [] });
+    });
+
+    // click a hex to pin it (re-click the same hex to unpin)
+    map.on('click', 'hexgrid-fill', (e) => {
+      if (e.features.length > 0) {
+        togglePin(e.features[0].properties);
+      }
+    });
+
+    map.on('mouseenter', 'hexgrid-fill', () => {
+      map.getCanvas().style.cursor = 'pointer';
     });
 
     // Dynamic resolution and viewport-based rendering
@@ -3557,6 +3733,49 @@ async function runTests() {
     }
   }
 
+  // === 17. CLICK-TO-PIN ===
+  show('\n─── 17. Click-to-Pin ───');
+  {
+    clearAllPins();
+
+    // position over central europe so all test cells are rendered on screen
+    map.jumpTo({ center: [3.5, 50.0], zoom: 4, bearing: 0, pitch: 0 });
+    await new Promise(r => setTimeout(r, 200));
+    await updateGrid(getResolutionForZoom(4), false);
+    await new Promise(r => setTimeout(r, 600)); // let maplibre paint the grid
+
+    const pinned1 = window.pinCellAt(2.35, 48.86); // paris
+    assert(pinned1, 'pinCellAt(paris) found a rendered cell');
+    assert(pinnedCells.size === 1, 'pin added: ' + pinnedCells.size + ' pinned');
+    assert(document.querySelectorAll('.pin-card').length === 1, 'pin card rendered in DOM');
+    const pinSrcData = map.getSource('pinned-cells')._data;
+    assert(pinSrcData.features.length === 1, 'pinned-cells source has 1 feature');
+    assert(pinSrcData.features[0].properties.h3Index === pinnedCells.keys().next().value,
+      'pinned feature h3Index matches state');
+
+    // re-pin same cell → toggles off
+    window.pinCellAt(2.35, 48.86);
+    assert(pinnedCells.size === 0, 're-click toggles pin off');
+    assert(document.querySelectorAll('.pin-card').length === 0, 'pin card removed from DOM');
+
+    // MAX_PINS cap with FIFO eviction
+    window.pinCellAt(2.35, 48.86);   // paris
+    window.pinCellAt(-0.12, 51.51);  // london
+    window.pinCellAt(4.35, 50.85);   // brussels
+    const firstPin = pinnedCells.keys().next().value;
+    window.pinCellAt(8.68, 50.11);   // frankfurt → evicts oldest
+    assert(pinnedCells.size === MAX_PINS, 'pin count capped at MAX_PINS (' + MAX_PINS + ')');
+    assert(!pinnedCells.has(firstPin), 'oldest pin evicted FIFO');
+    assert(map.getSource('pinned-routes')._data.features.length > 0,
+      'pinned routes rendered: ' + map.getSource('pinned-routes')._data.features.length + ' segments');
+
+    // clear all (ESC path)
+    clearAllPins();
+    assert(pinnedCells.size === 0, 'clearAllPins empties state');
+    assert(map.getSource('pinned-cells')._data.features.length === 0, 'pinned-cells source cleared');
+    assert(document.querySelectorAll('.pin-card').length === 0, 'cards cleared from DOM');
+  }
+
   // === SUMMARY ===
   show('\n' + '═'.repeat(50));
   if (results.fail === 0) {
@@ -3579,21 +3798,23 @@ async function runTests() {
   return results;
 }
 
-function showTooltip(properties) {
-  const tooltip = document.getElementById('tooltip');
-  const breakdown = JSON.parse(properties.breakdown);
-  const route = JSON.parse(properties.route);
+// parse a value that may be a JSON string (maplibre stringifies nested
+// feature properties) or already an object (direct calls)
+function parseMaybeJSON(v) {
+  return typeof v === 'string' ? JSON.parse(v) : v;
+}
+
+// build the location name, formatted time, and breakdown HTML for a cell's
+// feature properties — shared by the hover tooltip and pinned destination cards
+function buildCellReadout(properties) {
+  const breakdown = parseMaybeJSON(properties.breakdown);
+  const route = parseMaybeJSON(properties.route);
 
   // find airport name for location display (prefer full dataset, fall back to hardcoded)
   const destAptData = LOADED_AIRPORTS?.[route.destAirport];
   const locationName = destAptData ? `Near ${destAptData.name}` : 'Location';
 
-  document.getElementById('tooltip-location').textContent = locationName;
-  document.getElementById('tooltip-time').textContent = formatTime(properties.travelTimeMinutes);
-  document.getElementById('tooltip-time').style.color = properties.color;
-
   // build dynamic breakdown rows
-  const container = document.getElementById('tooltip-breakdown');
   let html = '';
 
   // ground source label (OSRM = real road data, haversine = straight-line estimate)
@@ -3646,13 +3867,17 @@ function showTooltip(properties) {
   }
 
   // debug: cell coords
-  const centroid = JSON.parse(properties.centroid);
+  const centroid = parseMaybeJSON(properties.centroid);
   html += `<div class="breakdown-row" style="opacity:0.5;font-size:11px;margin-top:4px">`;
   html += `<span>${centroid[1].toFixed(3)}, ${centroid[0].toFixed(3)}</span>`;
   html += `</div>`;
 
-  container.innerHTML = html;
-  tooltip.classList.add('visible');
+  return {
+    locationName,
+    timeText: formatTime(properties.travelTimeMinutes),
+    color: properties.color,
+    html,
+  };
 
   // helper: one breakdown row
   function row(label, minutes) {
@@ -3664,9 +3889,143 @@ function showTooltip(properties) {
   }
 }
 
+function showTooltip(properties) {
+  const readout = buildCellReadout(properties);
+  document.getElementById('tooltip-location').textContent = readout.locationName;
+  document.getElementById('tooltip-time').textContent = readout.timeText;
+  document.getElementById('tooltip-time').style.color = readout.color;
+  document.getElementById('tooltip-breakdown').innerHTML = readout.html;
+  document.getElementById('tooltip').classList.add('visible');
+}
+
 function hideTooltip() {
   document.getElementById('tooltip').classList.remove('visible');
 }
+
+// =============================================================================
+// CLICK-TO-PIN — click a hex to pin it: persistent highlighted cell + gold
+// route line + a destination card (location, total time, leg breakdown).
+// Re-click the same hex (or its card's ×) to unpin. ESC clears all pins.
+// Oldest pin is dropped when exceeding MAX_PINS (compare 2-3 destinations).
+// =============================================================================
+
+const pinnedCells = new Map(); // h3Index -> { properties, boundaryFeature, routeFeatures }
+const MAX_PINS = 3;
+
+function togglePin(properties) {
+  const h3Index = properties.h3Index;
+  if (!h3Index) return;
+
+  if (pinnedCells.has(h3Index)) {
+    pinnedCells.delete(h3Index);
+  } else {
+    if (pinnedCells.size >= MAX_PINS) {
+      // FIFO: drop the oldest pin to make room
+      pinnedCells.delete(pinnedCells.keys().next().value);
+    }
+    pinnedCells.set(h3Index, buildPinEntry(properties));
+  }
+  refreshPins();
+}
+
+function unpinCell(h3Index) {
+  if (pinnedCells.delete(h3Index)) refreshPins();
+}
+
+function clearAllPins() {
+  if (pinnedCells.size === 0) return;
+  pinnedCells.clear();
+  refreshPins();
+}
+
+// snapshot everything needed to render a pin — independent of the live grid,
+// so pins survive pan/zoom/resolution changes
+function buildPinEntry(properties) {
+  const route = parseMaybeJSON(properties.route);
+  const centroid = parseMaybeJSON(properties.centroid);
+
+  // hex boundary polygon (same antimeridian handling as generateHexGridDirect)
+  const boundary = h3.cellToBoundary(properties.h3Index);
+  let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
+  const lngs = coordinates.map(c => c[0]);
+  if (lngs.some(lng => lng > 90) && lngs.some(lng => lng < -90)) {
+    coordinates = coordinates.map(([lng, lat]) => [lng < 0 ? lng + 360 : lng, lat]);
+  }
+  coordinates.push(coordinates[0]);
+
+  const boundaryFeature = {
+    type: 'Feature',
+    properties: { h3Index: properties.h3Index, color: properties.color },
+    geometry: { type: 'Polygon', coordinates: [coordinates] },
+  };
+
+  // route polyline features (reuses the hover route-line builder)
+  let routeFeatures = [];
+  try {
+    if (route) routeFeatures = buildRouteGeoJSON(route, centroid).features;
+  } catch (e) {}
+
+  return { properties, boundaryFeature, routeFeatures };
+}
+
+// push pin state to the map sources + rebuild the cards panel
+function refreshPins() {
+  if (map && map.getSource('pinned-cells')) {
+    map.getSource('pinned-cells').setData({
+      type: 'FeatureCollection',
+      features: [...pinnedCells.values()].map(p => p.boundaryFeature),
+    });
+    map.getSource('pinned-routes').setData({
+      type: 'FeatureCollection',
+      features: [...pinnedCells.values()].flatMap(p => p.routeFeatures),
+    });
+  }
+  renderPinCards();
+}
+
+function renderPinCards() {
+  const container = document.getElementById('pin-cards');
+  if (!container) return;
+
+  let html = '';
+  for (const [h3Index, pin] of pinnedCells) {
+    const readout = buildCellReadout(pin.properties);
+    html += `
+      <div class="pin-card" data-h3="${h3Index}">
+        <div class="pin-card-header">
+          <div class="pin-card-title"><span class="pin-dot" style="background:${readout.color}"></span>${readout.locationName}</div>
+          <div class="pin-card-time" style="color:${readout.color}">${readout.timeText}</div>
+          <button class="pin-card-close" data-h3="${h3Index}" title="Unpin">×</button>
+        </div>
+        <div class="tooltip-breakdown">${readout.html}</div>
+      </div>`;
+  }
+  if (pinnedCells.size > 0) {
+    html += `<div class="pin-cards-hint">click hex to unpin · ESC clears all</div>`;
+  }
+  container.innerHTML = html;
+
+  // wire close buttons
+  container.querySelectorAll('.pin-card-close').forEach(btn => {
+    btn.addEventListener('click', () => unpinCell(btn.dataset.h3));
+  });
+}
+
+// programmatic pin at a lng/lat — used by the interaction benchmark + tests
+// (queries the rendered grid, so the target cell must be on screen)
+window.pinCellAt = function(lng, lat) {
+  const pt = map.project([lng, lat]);
+  const feats = map.queryRenderedFeatures(pt, { layers: ['hexgrid-fill'] });
+  if (!feats.length) return false;
+  togglePin(feats[0].properties);
+  return true;
+};
+window.clearAllPins = clearAllPins;
+
+// ESC clears all pins
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') clearAllPins();
+});
 
 // build geojson for route line visualization on hover
 // returns FeatureCollection with:

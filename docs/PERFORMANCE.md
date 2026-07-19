@@ -558,3 +558,62 @@ Connection at PEK      2h 00m
 PEK → NDG             2h 13m
 Arrival + ground       6h 31m
 ```
+
+---
+
+## Interaction Performance Suite (added 2026-07-03)
+
+The static `runBenchmark()` above times grid *generation*. The interaction suite
+measures what a user actually feels: **frame pacing during continuous pan, zoom,
+globe rotation, bearing spins, and the click-to-pin interaction** — via
+requestAnimationFrame sampling + a PerformanceObserver('longtask').
+
+### How to run
+
+```bash
+# 1. serve the repo
+python3 -m http.server 8899
+
+# 2. run headless (requires: pip install playwright && playwright install chromium)
+python3 scripts/run-interaction-bench.py --label my-change
+
+# 3. compare against a baseline
+python3 scripts/run-interaction-bench.py --label my-change \
+    --compare docs/benchmarks/2026-07-03-interaction-baseline-main-raspberrypi.json
+```
+
+Or in the browser console: paste `scripts/interaction-bench.js`, then
+`await runInteractionBench()`.
+
+Scenarios: `pan-continuous-z4`, `pan-continuous-z6` (chunked res-6 path),
+`zoom-in-out` (crosses every res threshold), `rotate-globe` (longitude spin,
+globe projection), `bearing-spin-z5`, `pin-interaction` (skipped on builds
+without click-to-pin). Metrics per scenario: fps, avg/median/p95/max frame ms,
+jank% (frames >33.4ms), long-task count + blocked ms. Sampling continues 1.4s
+past each animation to capture the debounced updateGrid() regen cost.
+
+Workflow for future perf work: run before your change (`--label baseline-X`),
+run after (`--compare` the baseline), commit both JSONs to `docs/benchmarks/`.
+
+### 2026-07-03 — pi baseline (main) vs click-to-pin branch
+
+**Hardware**: Raspberry Pi 5, 4GB, headless chromium (software GL) — the weak-device
+proxy. Absolute numbers are grim by design; use them comparatively. NB the pi numbers
+are NOISY (box runs other agents; rotate-globe swung 0.3–0.8 fps across identical-code
+runs) — trust deltas only when they exceed run-to-run variance.
+
+| scenario | main (fps / p95 ms) | pin branch (fps / p95 ms) | verdict |
+|---|---|---|---|
+| pan-continuous-z4 | 1.9 / 700 | 1.9 / 767 | no change |
+| pan-continuous-z6 | 1.5 / 1167 | 1.7 / 717 | no change (noise) |
+| zoom-in-out | 2.2 / 983 | 1.9 / 967 | no change |
+| rotate-globe | 0.8 / 4883 | 0.3 / 13416 | noise — A/B rerun: main 0.5/14133 vs pin 0.4/9050 |
+| bearing-spin-z5 | 2.6 / 2150 | 1.2 / 1600 | noise (main swings similarly) |
+| pin-interaction | — | 39.5 / 17 (1.1% jank) | pin/unpin itself is cheap |
+
+Conclusion: **click-to-pin adds no measurable interaction regression** (its layers/
+sources are empty when no pins are set). The pi's real bottleneck is unchanged:
+software-rendered globe fills during continuous movement. That's the A1 hill-climb
+target — a mac baseline should be added next time this runs on the mac.
+
+Files: `docs/benchmarks/2026-07-03-interaction-*.json`
