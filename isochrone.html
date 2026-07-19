@@ -851,6 +851,13 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div class="toggle-row">
+        <span>Multi-select</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-multiselect">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
       <div class="slider-row">
         <div class="slider-header">
           <span>Color scale</span>
@@ -4007,7 +4014,7 @@ function hideTooltip() {
 // =============================================================================
 
 const pinnedCells = new Map(); // h3Index -> { properties, boundaryFeature, routeFeatures }
-const MAX_PINS = 1; // one placed route at a time (josh 2026-07-19); click replaces
+let MAX_PINS = 1; // one placed route by default; the Multi-select toggle raises it to 3
 
 function togglePin(properties) {
   const h3Index = properties.h3Index;
@@ -4241,6 +4248,16 @@ function buildRouteGeoJSON(route, centroid) {
 // =============================================================================
 // EVENT LISTENERS
 // =============================================================================
+
+// multi-select (off by default): allow up to 3 pinned destinations for
+// side-by-side comparison; turning it off keeps only the newest pin
+document.getElementById('toggle-multiselect').addEventListener('change', (e) => {
+  MAX_PINS = e.target.checked ? 3 : 1;
+  while (pinnedCells.size > MAX_PINS) {
+    pinnedCells.delete(pinnedCells.keys().next().value); // evict oldest first
+  }
+  refreshPins();
+});
 
 document.getElementById('toggle-airports').addEventListener('change', (e) => {
   const visibility = e.target.checked ? 'visible' : 'none';
