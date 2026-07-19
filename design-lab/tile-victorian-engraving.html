@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Isochronic Passage Chart — Bristol</title>
+<style>
+  /* victorian engraving tile — fixed 1000x750 artboard, top-left anchored */
+  html, body { margin: 0; padding: 0; background: #2b241a; overflow: hidden; }
+  .plate { width: 1000px; height: 750px; display: block; }
+  text { font-family: Georgia, 'Palatino Linotype', Palatino, 'Times New Roman', serif; }
+  .titleMain  { font-size: 24px; letter-spacing: 7px; fill: #362817; font-weight: normal; }
+  .titleSub   { font-size: 15px; font-style: italic; fill: #4a3a24; letter-spacing: 0.6px; }
+  .plateNo    { font-size: 10.5px; letter-spacing: 2.5px; fill: #5b4930; }
+  .seaName    { font-size: 11.5px; font-style: italic; letter-spacing: 4.5px; fill: #6d5b3c; }
+  .seaNameSm  { font-size: 9px; font-style: italic; letter-spacing: 3px; fill: #6d5b3c; }
+  .cityLabel  { font-size: 13px; fill: #2e2112; paint-order: stroke; stroke: #e9dcbc; stroke-width: 3px; stroke-linejoin: round; }
+  .originLabel{ font-size: 12px; letter-spacing: 2.2px; font-weight: bold; fill: #241a0c; paint-order: stroke; stroke: #e9dcbc; stroke-width: 3.4px; stroke-linejoin: round; }
+  .bandnum    { font-size: 10px; font-style: italic; fill: #43301a; paint-order: stroke; stroke: #e6d8b6; stroke-width: 2.6px; stroke-linejoin: round; text-anchor: middle; }
+  .legTitle   { font-size: 12px; letter-spacing: 2.6px; fill: #362817; }
+  .legRow     { font-size: 11.5px; fill: #3c2d19; }
+  .legNote    { font-size: 10px; font-style: italic; fill: #5b4930; }
+  .caption    { font-size: 11px; font-style: italic; fill: #4a3a24; letter-spacing: 0.4px; }
+</style>
+</head>
+<body>
+<svg class="plate" viewBox="0 0 1000 750" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <!-- plate grain: fine fractal noise, multiplied over everything for a printed-impression feel -->
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="11"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.30  0 0 0 0 0.24  0 0 0 0 0.15  0.9 0 0 0 0"/>
+    </filter>
+    <!-- large-scale mottling: aged, unevenly toned paper -->
+    <filter id="mottle" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008" numOctaves="3" seed="4"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.38  0 0 0 0 0.28  0 0 0 0 0.12  0.55 0 0 0 -0.08"/>
+    </filter>
+    <!-- hand-of-the-engraver wobble: displaces coastlines and band edges identically -->
+    <filter id="wobble" x="-6%" y="-6%" width="112%" height="112%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.013" numOctaves="2" seed="7" result="t"/>
+      <feDisplacementMap in="SourceGraphic" in2="t" scale="4.5" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <!-- engraved sea: fine rippled horizontal lining -->
+    <pattern id="sea" width="14" height="5" patternUnits="userSpaceOnUse">
+      <path d="M0,2.6 Q3.5,1.1 7,2.6 T14,2.6" fill="none" stroke="#8f7c55" stroke-width="0.45"/>
+    </pattern>
+    <!-- land stipple -->
+    <pattern id="stip" width="8" height="8" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="0.5" fill="#7c6a48"/>
+      <circle cx="6" cy="6" r="0.4" fill="#7c6a48"/>
+    </pattern>
+    <!-- border engine-turning -->
+    <pattern id="bhatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="4" stroke="#6b5136" stroke-width="0.7"/>
+    </pattern>
+    <!-- foxing spot -->
+    <radialGradient id="fox">
+      <stop offset="0%"  stop-color="#8a6a34" stop-opacity="0.55"/>
+      <stop offset="70%" stop-color="#8a6a34" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#8a6a34" stop-opacity="0"/>
+    </radialGradient>
+    <!-- plate vignette -->
+    <radialGradient id="vg" cx="50%" cy="48%" r="74%">
+      <stop offset="0%"  stop-color="#402c10" stop-opacity="0"/>
+      <stop offset="72%" stop-color="#402c10" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#402c10" stop-opacity="0.22"/>
+    </radialGradient>
+
+    <clipPath id="mapclip"><rect x="40" y="118" width="920" height="578"/></clipPath>
+
+    <!-- the landmass linework, referenced repeatedly (waterlines, fill, stipple) -->
+    <g id="landall">
+      <!-- Britain (holds the origin) -->
+      <path d="M 372,222 C 352,228 358,248 342,258 C 324,268 334,286 320,298
+               C 300,308 310,326 298,338 C 284,350 296,364 288,376
+               C 276,390 286,402 278,414 C 264,426 272,440 260,448
+               C 244,456 236,468 248,476 C 262,484 286,472 306,478
+               C 330,486 356,472 382,478 C 406,484 428,470 422,452
+               C 442,446 446,428 432,416 C 448,402 442,382 426,374
+               C 438,356 428,338 414,330 C 424,310 414,292 402,284
+               C 412,266 402,246 392,240 C 398,228 386,218 372,222 Z"/>
+      <!-- Ireland -->
+      <path d="M 214,338 C 194,344 186,366 196,384 C 186,400 200,416 220,412
+               C 242,408 252,388 244,368 C 252,350 236,332 214,338 Z"/>
+      <!-- Scandinavian lobe -->
+      <path d="M 700,100 L 702,120 C 690,144 700,166 686,188 C 674,210 690,228 708,238
+               C 726,246 740,232 746,214 C 754,192 748,168 756,146 C 762,130 760,112 762,100 Z"/>
+      <!-- continental mainland: baltic, channel, biscay, iberia, mediterranean, italy, balkans -->
+      <path d="M 884,100 L 884,112
+               C 866,146 836,160 840,192 C 843,216 806,222 798,246
+               C 792,268 754,262 744,288 C 730,310 692,302 672,322
+               C 652,340 616,330 598,348 C 578,362 556,344 534,360
+               C 512,376 494,404 502,428 C 484,442 458,446 450,468
+               C 436,486 404,486 386,506 C 362,514 352,530 368,540
+               C 352,548 360,566 352,584 C 344,598 312,592 284,600
+               C 254,608 240,624 246,644 C 252,668 240,688 252,706
+               L 268,720 L 320,720
+               C 330,700 322,684 340,672 C 360,660 372,668 392,660
+               C 420,650 424,632 452,628 C 480,624 492,612 512,606
+               C 534,600 548,606 560,618 C 582,636 604,652 622,668
+               C 640,682 664,696 668,712 L 686,712
+               C 682,690 676,660 668,632 C 662,606 656,578 648,548
+               C 656,560 668,566 676,572 C 690,596 700,624 706,650
+               C 712,676 720,700 726,716 L 760,720 L 990,720 L 990,100 Z"/>
+    </g>
+  </defs>
+
+  <!-- ══════════ ground ══════════ -->
+  <rect width="1000" height="750" fill="#e9dcbc"/>
+  <rect width="1000" height="750" filter="url(#mottle)" opacity="0.4" style="mix-blend-mode:multiply"/>
+  <circle cx="152" cy="182" r="42" fill="url(#fox)" opacity="0.11"/>
+  <circle cx="882" cy="606" r="56" fill="url(#fox)" opacity="0.09"/>
+  <circle cx="512" cy="724" r="30" fill="url(#fox)" opacity="0.10"/>
+  <circle cx="700" cy="140" r="26" fill="url(#fox)" opacity="0.08"/>
+
+  <!-- ══════════ the chart ══════════ -->
+  <g clip-path="url(#mapclip)">
+    <!-- engraved sea lining -->
+    <rect x="40" y="118" width="920" height="578" fill="url(#sea)" opacity="0.55"/>
+
+    <!-- faint graticule -->
+    <g stroke="#8a7a58" stroke-width="0.5" opacity="0.22">
+      <line x1="150" y1="118" x2="150" y2="696"/><line x1="270" y1="118" x2="270" y2="696"/>
+      <line x1="390" y1="118" x2="390" y2="696"/><line x1="510" y1="118" x2="510" y2="696"/>
+      <line x1="630" y1="118" x2="630" y2="696"/><line x1="750" y1="118" x2="750" y2="696"/>
+      <line x1="870" y1="118" x2="870" y2="696"/>
+      <line x1="40" y1="170" x2="960" y2="170"/><line x1="40" y1="270" x2="960" y2="270"/>
+      <line x1="40" y1="370" x2="960" y2="370"/><line x1="40" y1="470" x2="960" y2="470"/>
+      <line x1="40" y1="570" x2="960" y2="570"/><line x1="40" y1="670" x2="960" y2="670"/>
+    </g>
+
+    <!-- landmasses: coastal waterlining (sea side), crisp coast, stippled interior -->
+    <g filter="url(#wobble)">
+      <!-- sea-darkening underlay: land paints over it, so coast contrast is built inside one displacement field -->
+      <rect x="30" y="108" width="940" height="598" fill="#b9a97e" opacity="0.28"/>
+      <use href="#landall" fill="none" stroke="#7a684a" stroke-width="9"   opacity="0.08" stroke-linejoin="round"/>
+      <use href="#landall" fill="none" stroke="#7a684a" stroke-width="5.5" opacity="0.13" stroke-linejoin="round"/>
+      <use href="#landall" fill="none" stroke="#7a684a" stroke-width="2.6" opacity="0.20" stroke-linejoin="round"/>
+      <use href="#landall" fill="#f3e8c8" stroke="#4c3c25" stroke-width="1.3" stroke-linejoin="round"/>
+      <use href="#landall" fill="url(#stip)" stroke="none" opacity="0.55"/>
+    </g>
+
+    <!-- time-band watercolour washes (built by the one-shot script below) -->
+    <g id="bands" filter="url(#wobble)" style="mix-blend-mode:multiply"></g>
+    <g id="ringlines" filter="url(#wobble)"></g>
+
+    <!-- sea names -->
+    <path id="atlArc" d="M 62,548 Q 148,510 238,528" fill="none"/>
+    <text class="seaName"><textPath href="#atlArc">ATLANTIC OCEAN</textPath></text>
+    <text class="seaNameSm" x="487" y="298" text-anchor="middle">NORTH SEA</text>
+
+    <!-- boundary hour figures along a NE spoke -->
+    <g id="ringlabels"></g>
+
+    <!-- cities -->
+    <g>
+      <g stroke="#e9dcbc" stroke-width="0.9" fill="#33261a">
+        <circle cx="385" cy="415" r="2.6"/>
+        <circle cx="466" cy="462" r="2.6"/>
+        <circle cx="628" cy="372" r="2.6"/>
+        <circle cx="300" cy="660" r="2.6"/>
+        <circle cx="652" cy="592" r="2.6"/>
+        <circle cx="845" cy="295" r="2.6"/>
+      </g>
+      <text class="cityLabel" x="394" y="428">London</text>
+      <text class="cityLabel" x="475" y="459">Paris</text>
+      <text class="cityLabel" x="637" y="369">Berlin</text>
+      <text class="cityLabel" x="310" y="656">Madrid</text>
+      <text class="cityLabel" x="661" y="589">Rome</text>
+      <text class="cityLabel" x="854" y="292">Moscow</text>
+    </g>
+
+    <!-- the origin: ringed dot -->
+    <g>
+      <circle cx="330" cy="400" r="7"   fill="none" stroke="#241a0c" stroke-width="1.7"/>
+      <circle cx="330" cy="400" r="2.9" fill="#241a0c"/>
+      <text class="originLabel" x="330" y="382" text-anchor="middle">BRISTOL</text>
+    </g>
+  </g>
+
+  <!-- ══════════ legend cartouche ══════════ -->
+  <g>
+    <rect x="724" y="478" width="228" height="208" fill="#ecdfbe" stroke="#3f3019" stroke-width="1.4"/>
+    <rect x="729" y="483" width="218" height="198" fill="none" stroke="#3f3019" stroke-width="0.55"/>
+    <text class="legTitle" x="838" y="505" text-anchor="middle">EXPLANATION</text>
+    <text class="legTitle" x="838" y="521" text-anchor="middle" style="font-size:10px; letter-spacing:3.2px;">OF THE COLOURS</text>
+    <g stroke="#4a3822" stroke-width="0.7">
+      <line x1="756" y1="528" x2="920" y2="528"/>
+    </g>
+    <g id="legendRows"></g>
+    <text class="legNote" x="838" y="676" text-anchor="middle">The tints measure time, not distance.</text>
+  </g>
+
+  <!-- ══════════ frame + titling ══════════ -->
+  <rect x="40" y="118" width="920" height="578" fill="none" stroke="#3a2c18" stroke-width="1.2"/>
+  <path d="M16,16H984V734H16Z M24,24H976V726H24Z" fill="url(#bhatch)" fill-rule="evenodd" opacity="0.4"/>
+  <rect x="16" y="16" width="968" height="718" fill="none" stroke="#3a2c18" stroke-width="2.2"/>
+  <rect x="24" y="24" width="952" height="702" fill="none" stroke="#3a2c18" stroke-width="0.8"/>
+  <g fill="#3a2c18">
+    <rect x="14" y="14" width="12" height="12"/><rect x="974" y="14" width="12" height="12"/>
+    <rect x="14" y="724" width="12" height="12"/><rect x="974" y="724" width="12" height="12"/>
+  </g>
+  <g fill="#e9dcbc">
+    <circle cx="20" cy="20" r="2.2"/><circle cx="980" cy="20" r="2.2"/>
+    <circle cx="20" cy="730" r="2.2"/><circle cx="980" cy="730" r="2.2"/>
+  </g>
+
+  <text class="plateNo" x="52" y="48">JETSPAN DESIGN LAB</text>
+  <text class="plateNo" x="948" y="48" text-anchor="end">PLATE I.</text>
+  <text class="titleMain" x="500" y="70" text-anchor="middle">ISOCHRONIC PASSAGE CHART</text>
+  <g stroke="#4a3822" stroke-width="1">
+    <line x1="74"  y1="64" x2="212" y2="64"/>
+    <line x1="788" y1="64" x2="926" y2="64"/>
+  </g>
+  <g fill="#4a3822">
+    <path d="M 222,64 l 5,-4 5,4 -5,4 Z"/>
+    <path d="M 768,64 l 5,-4 5,4 -5,4 Z"/>
+  </g>
+  <text class="titleSub" x="500" y="97" text-anchor="middle">Shewing the Shortest Journey Times from Bristol to the Principal Cities of Europe</text>
+
+  <text class="caption" x="500" y="718" text-anchor="middle">Constructed &amp; engraved for the JetSpan Design Laboratory — the tints shew hours of journey, after Galton (1881) and Bartholomew (1914).</text>
+
+  <!-- ══════════ plate texture on top ══════════ -->
+  <rect width="1000" height="750" filter="url(#grain)" opacity="0.14" style="mix-blend-mode:multiply"/>
+  <rect width="1000" height="750" fill="url(#vg)"/>
+
+  <script>
+  // one-shot synchronous generation of the seven wobbly isochrone bands.
+  // deterministic sinusoid wobble (no RNG) so adjacent annuli share exact boundaries.
+  (function(){
+    var NS='http://www.w3.org/2000/svg';
+    var cx=330, cy=400;                                  // Bristol
+    var rings=[75,160,240,335,455,590];                  // band boundaries: 3,6,10,15,22,32 h
+    var cols=['#5d8a4a','#85a45c','#adba6e','#d3c67f','#d9a55e','#c9763f','#8f3a26'];
+    function rr(R,k,t){                                  // wobbled, gently east-stretched radius
+      var w=0.03*Math.sin(3*t+k*1.7)+0.017*Math.sin(5*t+k*2.9)+0.008*Math.sin(9*t+k*0.8);
+      return R*(1+0.05*Math.cos(t)+w);
+    }
+    function pathOf(R,k){
+      var d='';
+      for(var i=0;i<72;i++){
+        var t=i/72*Math.PI*2, r=rr(R,k,t);
+        d+=(i?'L':'M')+(cx+r*Math.cos(t)).toFixed(1)+','+(cy+r*Math.sin(t)).toFixed(1);
+      }
+      return d+'Z';
+    }
+    var D=rings.map(function(R,i){return pathOf(R,i+1);});
+    var bands=document.getElementById('bands');
+    var lines=document.getElementById('ringlines');
+    function wash(d,fill){
+      var p=document.createElementNS(NS,'path');
+      p.setAttribute('d',d); p.setAttribute('fill',fill);
+      p.setAttribute('fill-rule','evenodd'); p.setAttribute('fill-opacity','0.5');
+      bands.appendChild(p);
+    }
+    wash('M30,108H970V706H30Z '+D[5], cols[6]);          // 32h+ : everything beyond the last ring
+    for(var i=5;i>=1;i--) wash(D[i]+' '+D[i-1], cols[i]); // annuli 22-32 ... 3-6
+    wash(D[0], cols[0]);                                  // under 3h disc
+    for(var j=0;j<6;j++){
+      var s=document.createElementNS(NS,'path');
+      s.setAttribute('d',D[j]); s.setAttribute('fill','none');
+      s.setAttribute('stroke','#5f482a'); s.setAttribute('stroke-width','0.9');
+      s.setAttribute('stroke-opacity','0.75');
+      lines.appendChild(s);
+    }
+    // boundary hour figures along a north-easterly spoke
+    var labs=document.getElementById('ringlabels');
+    var nums=['3','6','10','15','22','32'], th=-0.314;
+    for(var m=0;m<6;m++){
+      var r=rr(rings[m],m+1,th);
+      var tx=document.createElementNS(NS,'text');
+      tx.setAttribute('class','bandnum');
+      tx.setAttribute('x',(cx+r*Math.cos(th)).toFixed(1));
+      tx.setAttribute('y',(cy+r*Math.sin(th)).toFixed(1));
+      tx.setAttribute('dy','0.35em');
+      tx.textContent=nums[m];
+      labs.appendChild(tx);
+    }
+    // legend rows: swatch + wording, colours matched to the washes
+    var rows=["Within 3 hours' journey","From 3 to 6 hours","From 6 to 10 hours",
+              "From 10 to 15 hours","From 15 to 22 hours","From 22 to 32 hours","Above 32 hours"];
+    var lg=document.getElementById('legendRows');
+    for(var n=0;n<7;n++){
+      var y=540+n*17.5;
+      var sw=document.createElementNS(NS,'rect');
+      sw.setAttribute('x','742'); sw.setAttribute('y',(y-10).toFixed(1));
+      sw.setAttribute('width','28'); sw.setAttribute('height','12');
+      sw.setAttribute('fill',cols[n]); sw.setAttribute('fill-opacity','0.55');
+      sw.setAttribute('stroke','#5f482a'); sw.setAttribute('stroke-width','0.7');
+      sw.style.mixBlendMode='multiply';
+      lg.appendChild(sw);
+      var tt=document.createElementNS(NS,'text');
+      tt.setAttribute('class','legRow'); tt.setAttribute('x','778'); tt.setAttribute('y',y.toFixed(1));
+      tt.textContent=rows[n];
+      lg.appendChild(tt);
+    }
+  })();
+  </script>
+</svg>
+</body>
+</html>

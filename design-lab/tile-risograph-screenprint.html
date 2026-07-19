@@ -1,0 +1,276 @@
+<meta charset="utf-8">
+<title>Isochronic Passage Chart — Riso Proof</title>
+<style>
+  /* riso / screenprint tile — 1000x750 fixed artboard, 4 spot inks on cream stock */
+  html,body{margin:0;padding:0;background:#3a352e;}
+  #board{width:1000px;height:750px;position:relative;overflow:hidden;background:#F2EDE0;}
+  svg{display:block;}
+  .ink{mix-blend-mode:multiply;}                                   /* every printed layer overprints */
+  .disp{font-family:'Arial Black','Arial Bold',Impact,'Haettenschweiler','Helvetica Neue',Helvetica,Arial,sans-serif;font-weight:900;}
+  .small{font-family:Verdana,Geneva,'DejaVu Sans',Tahoma,sans-serif;font-weight:bold;}
+</style>
+
+<div id="board">
+<svg id="art" width="1000" height="750" viewBox="0 0 1000 750" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- ================= halftone tint screens (limited inks -> tints via dots) ================= -->
+    <!-- green 55% screen : the "3-6h" light-green band -->
+    <pattern id="pG55" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(18)">
+      <circle cx="3.5" cy="3.5" r="2.93" fill="#0E9A58"/>
+    </pattern>
+    <!-- green 38% screen : overprints yellow -> chartreuse "6-10h" -->
+    <pattern id="pG38" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(64)">
+      <circle cx="3.5" cy="3.5" r="2.43" fill="#0E9A58"/>
+    </pattern>
+    <!-- fluoro red 50% screen : overprints yellow -> orange "15-22h" -->
+    <pattern id="pR50" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(5)">
+      <circle cx="4" cy="4" r="3.19" fill="#EE4A26"/>
+    </pattern>
+    <!-- soot 60% screen : overprints fluoro red -> deep maroon "32h+" -->
+    <pattern id="pK60" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
+      <circle cx="3.5" cy="3.5" r="3.06" fill="#35302A"/>
+    </pattern>
+    <!-- green 10% coarse screen : the continent silhouette tint -->
+    <pattern id="pLand" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <circle cx="4.5" cy="4.5" r="1.85" fill="#0E9A58"/>
+    </pattern>
+
+    <!-- ================= paper + press filters ================= -->
+    <!-- fine dark speckle grain (toner dust) -->
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.23  0 0 0 0 0.20  0 0 0 0 0.16  0 0 0 0.55 0"/>
+    </filter>
+    <!-- pale paper fibre -->
+    <filter id="fibre" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04 0.18" numOctaves="2" seed="21" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 0.99  0 0 0 0 0.93  0 0 0 0.5 0"/>
+    </filter>
+    <!-- big soft mottle = uneven ink coverage off the drum -->
+    <filter id="inkwash" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" seed="4" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0"/>
+    </filter>
+    <!-- roughen panel edges so the paper knockouts feel screenprinted -->
+    <filter id="rough" x="-6%" y="-12%" width="112%" height="124%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="3" seed="11" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="6"/>
+    </filter>
+  </defs>
+
+  <!-- ================= paper stock ================= -->
+  <rect width="1000" height="750" fill="#F2EDE0"/>
+
+  <!-- ================= landmass silhouette (abstract western europe, green 10% screen) ================= -->
+  <g id="land">
+    <!-- continent proper, runs off the right edge -->
+    <path class="ink" fill="url(#pLand)" d="M470,332 Q500,318 522,302 Q560,270 606,242 Q640,222 676,204 Q730,178 788,166 Q880,150 1000,158 L1000,564 Q930,552 862,560 Q800,566 764,598 Q734,622 706,566 Q698,552 686,544 Q672,538 668,566 Q664,600 676,632 Q680,652 662,648 Q640,640 632,606 Q626,576 610,556 Q590,532 556,540 Q520,548 492,570 Q474,582 470,600 Q466,636 452,668 Q430,706 366,712 Q296,716 258,672 Q236,646 252,600 Q262,566 286,552 Q318,534 352,528 Q368,520 372,498 Q376,470 356,458 Q384,444 408,436 Q436,430 448,410 Q456,392 448,376 Q452,352 470,332 Z"/>
+    <!-- scandinavia hint -->
+    <path class="ink" fill="url(#pLand)" d="M636,150 Q660,96 700,72 Q740,52 768,62 Q790,72 776,108 Q762,146 726,168 Q690,190 662,186 Q636,180 636,150 Z"/>
+    <!-- britain -->
+    <path class="ink" fill="url(#pLand)" d="M296,142 Q322,132 330,158 Q338,186 332,210 Q348,236 354,268 Q362,310 368,344 Q374,380 372,404 Q370,428 344,432 Q316,436 292,430 Q262,436 240,428 Q224,422 232,408 Q244,394 262,390 Q252,376 254,360 Q244,352 246,336 Q252,318 266,314 Q258,290 262,264 Q266,232 276,206 Q270,176 280,156 Q286,144 296,142 Z"/>
+    <!-- ireland -->
+    <path class="ink" fill="url(#pLand)" d="M150,262 Q178,248 196,262 Q212,276 206,304 Q200,336 178,352 Q154,366 138,352 Q124,338 132,310 Q138,282 150,262 Z"/>
+  </g>
+
+  <!-- ================= ink plates (bands injected by the one-shot generator below) =================
+       each plate carries a deliberate 1-2px registration slip; multiply = overprint -->
+  <g id="plateY" transform="translate(-1.4,1.0)"></g>   <!-- sunflower yellow -->
+  <g id="plateG" transform="translate(1.2,-0.8)"></g>   <!-- green -->
+  <g id="plateR" transform="translate(1.8,-1.2)"></g>   <!-- fluoro red -->
+  <g id="plateKb" transform="translate(-1.1,-1.5)"></g> <!-- soot screen on band 7 -->
+
+  <!-- scale ray + hour chips injected here by the generator -->
+  <g id="rayg"></g>
+
+  <!-- ================= paper knockout panels (unprinted stock showing through) ================= -->
+  <!-- title block -->
+  <g transform="rotate(-0.7 26 26)">
+    <rect x="26" y="26" width="474" height="172" fill="#F2EDE0" filter="url(#rough)"/>
+    <text class="small" x="46" y="56" font-size="10" letter-spacing="2.2" fill="#0E9A58">JETSPAN LAB &#183; PASSAGE SERIES &#183; RISO PROOF</text>
+    <!-- red plate ghost of the title (registration slip), soot on top -->
+    <g class="ink" opacity="0.9"><text class="disp" x="46.2" y="101.6" font-size="40" letter-spacing="1" fill="#EE4A26" transform="translate(2.2,1.6)">ISOCHRONIC</text>
+    <text class="disp" x="46.2" y="143.6" font-size="40" letter-spacing="1" fill="#EE4A26" transform="translate(2.2,1.6)">PASSAGE CHART</text></g>
+    <text class="disp ink" x="46" y="101" font-size="40" letter-spacing="1" fill="#35302A">ISOCHRONIC</text>
+    <text class="disp ink" x="46" y="143" font-size="40" letter-spacing="1" fill="#35302A">PASSAGE CHART</text>
+    <rect class="ink" x="46" y="154" width="424" height="2.5" fill="#35302A"/>
+    <rect class="ink" x="47.5" y="158" width="424" height="1.5" fill="#0E9A58"/>
+    <text class="small ink" x="46" y="180" font-size="15" fill="#35302A">Shortest journey times from Bristol</text>
+  </g>
+
+  <!-- legend block -->
+  <g transform="rotate(0.5 692 438)">
+    <rect x="692" y="438" width="278" height="284" fill="#F2EDE0" filter="url(#rough)"/>
+    <text class="disp ink" x="712" y="470" font-size="16" letter-spacing="1.5" fill="#35302A">JOURNEY TIME</text>
+    <rect class="ink" x="712" y="478" width="238" height="2" fill="#0E9A58"/>
+    <g id="legend"></g> <!-- swatch rows injected by generator -->
+    <text class="small ink" x="712" y="712" font-size="9.5" letter-spacing="1.2" fill="#35302A" opacity="0.75">&#183; ONE PASS OF THE DRUM PER BAND &#183;</text>
+  </g>
+
+  <!-- caption strip -->
+  <g>
+    <rect x="26" y="706" width="690" height="32" fill="#F2EDE0" filter="url(#rough)"/>
+    <text class="small ink" x="40" y="726" font-size="9.5" fill="#35302A">Four spot inks &#8212; green &#183; sunflower &#183; fluoro red &#183; soot. Overprints mix the in-betweens. After Galton, 1881.</text>
+    <!-- printer's colour bar -->
+    <circle class="ink" cx="650" cy="722" r="5.5" fill="#0E9A58"/>
+    <circle class="ink" cx="667" cy="722" r="5.5" fill="#F6C51E"/>
+    <circle class="ink" cx="684" cy="722" r="5.5" fill="#EE4A26"/>
+    <circle class="ink" cx="701" cy="722" r="5.5" fill="#35302A"/>
+  </g>
+
+  <!-- registration crosshair, top right, with red slip -->
+  <g>
+    <g class="ink" stroke="#EE4A26" stroke-width="1.4" fill="none" transform="translate(1.6,1.2)">
+      <circle cx="954" cy="46" r="9"/><path d="M954,32 V60 M940,46 H968"/>
+    </g>
+    <g class="ink" stroke="#35302A" stroke-width="1.4" fill="none">
+      <circle cx="954" cy="46" r="9"/><path d="M954,32 V60 M940,46 H968"/>
+    </g>
+  </g>
+
+  <!-- ================= cities (soot plate, paper knockout halos) ================= -->
+  <g id="cities">
+    <!-- origin : BRISTOL, ringed -->
+    <circle cx="300" cy="390" r="12.5" fill="#F2EDE0"/>
+    <circle class="ink" cx="300" cy="390" r="9.5" fill="none" stroke="#35302A" stroke-width="3"/>
+    <circle class="ink" cx="301.4" cy="391" r="9.5" fill="none" stroke="#EE4A26" stroke-width="1.4" opacity="0.85"/>
+    <circle class="ink" cx="300" cy="390" r="3.6" fill="#35302A"/>
+    <text class="disp" x="286" y="373" font-size="17" letter-spacing="1" text-anchor="end"
+          fill="#35302A" stroke="#F2EDE0" stroke-width="5" paint-order="stroke">BRISTOL</text>
+  </g>
+
+  <!-- ================= press-texture overlays ================= -->
+  <rect width="1000" height="750" filter="url(#fibre)" style="mix-blend-mode:screen" opacity="0.16"/>
+  <rect width="1000" height="750" filter="url(#inkwash)" style="mix-blend-mode:soft-light" opacity="0.5"/>
+  <rect class="ink" width="1000" height="750" filter="url(#grain)" opacity="0.3"/>
+</svg>
+</div>
+
+<script>
+/* one-shot synchronous generator: builds the 7 organic band rings, the hour-chip ray,
+   the six far cities, and the legend swatches. no timers, no fetch, no animation. */
+(function(){
+  var NS='http://www.w3.org/2000/svg';
+  var CX=300, CY=390, SX=1.25;            // origin + eastward stretch
+  var PAPER='#F2EDE0', GRN='#0E9A58', YEL='#F6C51E', RED='#EE4A26', SOOT='#35302A';
+
+  // wobbly closed blob: radius r, deterministic seed, smoothed with quadratics
+  function blob(r,seed){
+    var n=72, p=[], i, a, w;
+    for(i=0;i<n;i++){
+      a=i/n*Math.PI*2;
+      w=1 + 0.048*Math.sin(3*a+seed) + 0.034*Math.sin(5*a+seed*2.17) + 0.02*Math.sin(8*a+seed*0.7);
+      p.push([CX+Math.cos(a)*r*w*SX, CY+Math.sin(a)*r*w]);
+    }
+    var d='M'+((p[0][0]+p[n-1][0])/2).toFixed(1)+','+((p[0][1]+p[n-1][1])/2).toFixed(1);
+    for(i=0;i<n;i++){
+      var q=p[i], s=p[(i+1)%n];
+      d+='Q'+q[0].toFixed(1)+','+q[1].toFixed(1)+' '+((q[0]+s[0])/2).toFixed(1)+','+((q[1]+s[1])/2).toFixed(1);
+    }
+    return d+'Z';
+  }
+  function P(gid,d,fill){
+    var el=document.createElementNS(NS,'path');
+    el.setAttribute('d',d); el.setAttribute('fill',fill);
+    el.setAttribute('fill-rule','evenodd'); el.setAttribute('class','ink');
+    document.getElementById(gid).appendChild(el);
+    return el;
+  }
+
+  // band boundaries (px radii) for <3h, 3-6, 6-10, 10-15, 15-22, 22-32, 32h+
+  var B=[48,95,155,245,310,410,520];
+  var S=[3,11,27,42,8,19,33];             // per-band wobble seeds
+  // ring i = outer blob minus inner blob shrunk 6px w/ nudged seed -> seams overlap + overprint
+  function ring(i){
+    var d=blob(B[i],S[i]);
+    if(i>0) d+=' '+blob(B[i-1]-12, S[i-1]+0.35);   /* 12px overlap so plate slip overprints, never gaps */
+    return d;
+  }
+
+  /* ink recipe per band (monotonic green -> yellow -> orange -> red -> dark):
+     1 solid green | 2 green 55% screen | 3 yellow + green 38% | 4 solid yellow
+     5 yellow + red 50% | 6 solid fluoro red | 7 red + soot 60% */
+  P('plateG', ring(0), GRN);
+  P('plateG', ring(1), 'url(#pG55)');
+  P('plateY', ring(2), YEL);  P('plateG', ring(2), 'url(#pG38)');
+  P('plateY', ring(3), YEL);
+  P('plateY', ring(4), YEL);  P('plateR', ring(4), 'url(#pR50)');
+  P('plateR', ring(5), RED);
+  P('plateR', ring(6), RED);  P('plateKb', ring(6), 'url(#pK60)');
+
+  // ---- scale ray + hour chips (down-left, angle 108deg) ----
+  var ray=document.getElementById('rayg');
+  var A=108*Math.PI/180, ux=Math.cos(A)*SX, uy=Math.sin(A);
+  var ln=document.createElementNS(NS,'line');
+  ln.setAttribute('x1',CX+ux*40); ln.setAttribute('y1',CY+uy*40);
+  ln.setAttribute('x2',CX+ux*300); ln.setAttribute('y2',CY+uy*300);
+  ln.setAttribute('stroke',SOOT); ln.setAttribute('stroke-width','1.6');
+  ln.setAttribute('stroke-dasharray','2 5'); ln.setAttribute('class','ink');
+  ray.appendChild(ln);
+  var HRS=['3h','6h','10h','15h','22h'];
+  for(var i=0;i<5;i++){
+    var r=B[i], t=document.createElementNS(NS,'text');
+    t.setAttribute('x',(CX+ux*r).toFixed(1)); t.setAttribute('y',(CY+uy*r+4).toFixed(1));
+    t.setAttribute('class','disp'); t.setAttribute('font-size','12');
+    t.setAttribute('text-anchor','middle'); t.setAttribute('fill',SOOT);
+    t.setAttribute('stroke',PAPER); t.setAttribute('stroke-width','4');
+    t.setAttribute('paint-order','stroke'); t.textContent=HRS[i];
+    ray.appendChild(t);
+  }
+
+  // ---- the six comparison cities (soot dots, paper halos) ----
+  var cities=[ ['LONDON',368,362, 382,357],
+               ['PARIS',438,428, 452,444],
+               ['BERLIN',585,318, 599,312],
+               ['MADRID',390,588, 404,604],
+               ['ROME',622,552, 636,568],
+               ['MOSCOW',835,248, 849,243] ];
+  var cg=document.getElementById('cities');
+  for(i=0;i<cities.length;i++){
+    var c=cities[i];
+    var halo=document.createElementNS(NS,'circle');
+    halo.setAttribute('cx',c[1]); halo.setAttribute('cy',c[2]); halo.setAttribute('r','6.5');
+    halo.setAttribute('fill',PAPER); cg.appendChild(halo);
+    var dot=document.createElementNS(NS,'circle');
+    dot.setAttribute('cx',c[1]); dot.setAttribute('cy',c[2]); dot.setAttribute('r','3.8');
+    dot.setAttribute('fill',SOOT); dot.setAttribute('class','ink'); cg.appendChild(dot);
+    var tx=document.createElementNS(NS,'text');
+    tx.setAttribute('x',c[3]); tx.setAttribute('y',c[4]);
+    tx.setAttribute('class','disp'); tx.setAttribute('font-size','13');
+    tx.setAttribute('letter-spacing','0.8'); tx.setAttribute('fill',SOOT);
+    tx.setAttribute('stroke',PAPER); tx.setAttribute('stroke-width','4.5');
+    tx.setAttribute('paint-order','stroke'); tx.textContent=c[0];
+    cg.appendChild(tx);
+  }
+
+  // ---- legend swatch rows (same ink recipes as the map bands) ----
+  var rows=[ ['UNDER 3 HOURS',  [[GRN,null]]],
+             ['3 – 6 HOURS',   [['url(#pG55)',null]]],
+             ['6 – 10 HOURS',  [[YEL,'url(#pG38)']]],
+             ['10 – 15 HOURS', [[YEL,null]]],
+             ['15 – 22 HOURS', [[YEL,'url(#pR50)']]],
+             ['22 – 32 HOURS', [[RED,null]]],
+             ['OVER 32 HOURS',  [[RED,'url(#pK60)']]] ];
+  var lg=document.getElementById('legend');
+  for(i=0;i<rows.length;i++){
+    var y=496+i*29, spec=rows[i][1][0];
+    // red keyline slip behind the swatch
+    var kr=document.createElementNS(NS,'rect');
+    kr.setAttribute('x',713.2); kr.setAttribute('y',y-12); kr.setAttribute('width',40); kr.setAttribute('height',18);
+    kr.setAttribute('fill','none'); kr.setAttribute('stroke',RED); kr.setAttribute('stroke-width','1.1');
+    kr.setAttribute('class','ink'); lg.appendChild(kr);
+    var sw=document.createElementNS(NS,'rect');
+    sw.setAttribute('x',712); sw.setAttribute('y',y-13); sw.setAttribute('width',40); sw.setAttribute('height',18);
+    sw.setAttribute('fill',spec[0]); sw.setAttribute('class','ink'); lg.appendChild(sw);
+    if(spec[1]){
+      var ov=document.createElementNS(NS,'rect');
+      ov.setAttribute('x',713.4); ov.setAttribute('y',y-14); ov.setAttribute('width',40); ov.setAttribute('height',18);
+      ov.setAttribute('fill',spec[1]); ov.setAttribute('class','ink'); lg.appendChild(ov);
+    }
+    var lt=document.createElementNS(NS,'text');
+    lt.setAttribute('x',764); lt.setAttribute('y',y+1);
+    lt.setAttribute('class','small'); lt.setAttribute('font-size','12'); lt.setAttribute('fill',SOOT);
+    lt.textContent=rows[i][0]; lg.appendChild(lt);
+  }
+})();
+</script>

@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Isochronic Passage Chart — Bristol (Art-Deco Poster)</title>
+<style>
+  /* fixed 1000x750 artboard, flush top-left so a top-left screenshot captures the whole poster */
+  html,body{margin:0;padding:0;background:#0a1512;}
+  #board{width:1000px;height:750px;position:relative;overflow:hidden;}
+  svg{display:block;}
+  text{user-select:none;}
+  .display{font-family:'Arial Narrow','Helvetica Neue Condensed','Helvetica Neue',Helvetica,Arial,sans-serif;font-weight:700;}
+  .serif{font-family:Georgia,'Times New Roman',serif;}
+</style>
+</head>
+<body>
+<div id="board">
+<svg id="poster" width="1000" height="750" viewBox="0 0 1000 750" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- gilt / metallic gradients -->
+    <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"   stop-color="#f2d992"/>
+      <stop offset="0.45" stop-color="#d8b25e"/>
+      <stop offset="0.75" stop-color="#a8823c"/>
+      <stop offset="1"   stop-color="#8a6a2b"/>
+    </linearGradient>
+    <linearGradient id="goldGradH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8a6a2b"/>
+      <stop offset="0.5" stop-color="#eed389"/>
+      <stop offset="1" stop-color="#8a6a2b"/>
+    </linearGradient>
+    <!-- vignette -->
+    <radialGradient id="vig" cx="50%" cy="45%" r="78%">
+      <stop offset="0" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="0.72" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.38"/>
+    </radialGradient>
+    <!-- paper grain -->
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+
+    <!-- abstract western-Europe landmass: Ireland + Britain + continent (stylized, not literal) -->
+    <path id="landPath" d="
+      M 196,352 C 216,344 234,354 236,372 C 244,390 236,410 220,418 C 204,428 184,420 178,404 C 170,388 176,362 196,352 Z
+      M 318,282 C 348,278 368,300 366,326 C 392,334 404,360 396,382 C 410,404 404,432 384,444
+      C 368,458 336,462 314,452 C 290,458 268,444 264,424 C 246,414 240,392 252,376
+      C 240,356 246,330 264,320 C 272,296 294,286 318,282 Z
+      M 470,415
+      C 495,398 520,378 535,348
+      C 545,318 565,295 595,290
+      C 590,250 615,205 655,188
+      C 705,168 758,178 778,215
+      C 792,252 780,288 748,306
+      C 802,300 868,318 898,348
+      C 924,374 930,420 916,458
+      C 900,508 862,538 822,554
+      C 782,570 742,560 722,584
+      C 702,614 662,624 642,600
+      C 646,580 632,566 616,576
+      C 602,600 586,634 566,639
+      C 550,644 541,625 553,610
+      C 570,586 580,560 575,540
+      C 550,525 510,530 480,545
+      C 470,570 450,600 415,615
+      C 375,630 330,615 320,580
+      C 315,550 335,525 365,515
+      C 390,505 405,485 400,465
+      C 405,445 425,430 445,430
+      C 455,425 462,420 470,415 Z"/>
+    <clipPath id="landClip"><use href="#landPath"/></clipPath>
+    <clipPath id="mapClip"><rect x="60" y="150" width="880" height="505"/></clipPath>
+
+    <!-- corner motif: nested deco angles + stud -->
+    <g id="corner">
+      <path d="M4,34 L4,4 L34,4" fill="none" stroke="url(#goldGrad)" stroke-width="3.5"/>
+      <path d="M12,34 L12,12 L34,12" fill="none" stroke="#c9a24b" stroke-width="1.4"/>
+      <path d="M8,8 L12,4 L16,8 L12,12 Z" fill="#eed389" transform="translate(8,8)"/>
+    </g>
+  </defs>
+
+  <!-- ================= FIELD ================= -->
+  <rect x="0" y="0" width="1000" height="750" fill="#0e211b"/>
+
+  <!-- ================= MAP ================= -->
+  <g clip-path="url(#mapClip)">
+    <!-- sea -->
+    <rect x="60" y="150" width="880" height="505" fill="#14322a"/>
+    <!-- deco sunburst rays from the origin (visible over the sea, land covers them) -->
+    <g id="raysG"></g>
+
+    <!-- 32h+ base landmass (farthest band = deep oxblood, near-black) -->
+    <use href="#landPath" fill="#421a11"/>
+
+    <!-- isochrone bands, clipped to land (script fills #bandsG) -->
+    <g id="bandsG" clip-path="url(#landClip)"></g>
+
+    <!-- gilt coastline over the bands -->
+    <use href="#landPath" fill="none" stroke="#d9bc6f" stroke-width="1.4" opacity="0.85"/>
+
+    <!-- engraved ring guides continuing the band edges across the sea -->
+    <g id="ringsG"></g>
+
+    <!-- deco compass star, NW sea -->
+    <g transform="translate(136,228)" opacity="0.8">
+      <path d="M0,-17 L4,-4 L17,0 L4,4 L0,17 L-4,4 L-17,0 L-4,-4 Z" fill="url(#goldGrad)"/>
+      <path d="M0,-9 L2,-2 L9,0 L2,2 L0,9 L-2,2 L-9,0 L-2,-2 Z" fill="#0e211b" opacity="0.55" transform="rotate(45)"/>
+    </g>
+    <!-- sparse deco wave marks, SW sea -->
+    <g stroke="#d9bc6f" stroke-width="1.3" fill="none" opacity="0.32" stroke-linecap="round">
+      <path d="M104,560 q7,-7 14,0 q7,-7 14,0"/>
+      <path d="M150,596 q7,-7 14,0 q7,-7 14,0"/>
+      <path d="M96,620 q7,-7 14,0 q7,-7 14,0"/>
+      <path d="M176,300 q7,-7 14,0 q7,-7 14,0"/>
+    </g>
+
+    <!-- dotted passage route Bristol -> Moscow with deco dart-plane (the diagonal) -->
+    <path d="M 352,388 Q 560,190 790,332" fill="none" stroke="#eed389" stroke-width="1.8"
+          stroke-dasharray="0.5 8" stroke-linecap="round" opacity="0.9"/>
+    <g transform="translate(622,276) rotate(5)">
+      <path d="M 20,0 L -14,-4.5 L -8,0 L -14,4.5 Z" fill="url(#goldGrad)" stroke="#5c4519" stroke-width="0.6"/>
+      <path d="M 5,-0.5 L -8,-14 L -2,-0.5 Z" fill="url(#goldGrad)" stroke="#5c4519" stroke-width="0.6"/>
+      <path d="M 5,0.5 L -8,14 L -2,0.5 Z" fill="url(#goldGrad)" stroke="#5c4519" stroke-width="0.6"/>
+      <path d="M -11,0 L -18,-5 L -14,0 L -18,5 Z" fill="url(#goldGrad)" stroke="#5c4519" stroke-width="0.5"/>
+    </g>
+
+    <!-- cities -->
+    <g class="display" font-size="12.5" letter-spacing="2.6" fill="#efe3c3"
+       style="paint-order:stroke" stroke="#10241f" stroke-width="3.5">
+      <g stroke="none">
+        <g fill="#efe3c3" stroke="#2a1508" stroke-width="1">
+          <circle cx="382" cy="405" r="4"/>
+          <circle cx="415" cy="455" r="4"/>
+          <circle cx="545" cy="380" r="4"/>
+          <circle cx="390" cy="595" r="4"/>
+          <circle cx="586" cy="566" r="4"/>
+          <circle cx="800" cy="340" r="4"/>
+        </g>
+        <g fill="none" stroke="#eed389" stroke-width="1" opacity="0.75">
+          <circle cx="382" cy="405" r="7.5"/>
+          <circle cx="415" cy="455" r="7.5"/>
+          <circle cx="545" cy="380" r="7.5"/>
+          <circle cx="390" cy="595" r="7.5"/>
+          <circle cx="586" cy="566" r="7.5"/>
+          <circle cx="800" cy="340" r="7.5"/>
+        </g>
+      </g>
+      <text x="394" y="396">LONDON</text>
+      <text x="427" y="470">PARIS</text>
+      <text x="557" y="372">BERLIN</text>
+      <text x="402" y="608">MADRID</text>
+      <text x="598" y="580">ROME</text>
+      <text x="812" y="333">MOSCOW</text>
+    </g>
+
+    <!-- origin medallion : BRISTOL -->
+    <g transform="translate(340,400)">
+      <circle r="19" fill="#0e211b" stroke="url(#goldGrad)" stroke-width="3"/>
+      <circle r="12.5" fill="none" stroke="#eed389" stroke-width="1.2" opacity="0.95"/>
+      <path d="M0,-7 L7,0 L0,7 L-7,0 Z" fill="url(#goldGrad)"/>
+      <circle r="1.8" fill="#0e211b"/>
+      <!-- four studs -->
+      <g fill="#eed389">
+        <circle cx="0" cy="-16" r="1.4"/><circle cx="0" cy="16" r="1.4"/>
+        <circle cx="-16" cy="0" r="1.4"/><circle cx="16" cy="0" r="1.4"/>
+      </g>
+    </g>
+    <g class="display" text-anchor="middle">
+      <text x="340" y="441" font-size="15" letter-spacing="4" fill="#f2d992"
+            style="paint-order:stroke" stroke="#10241f" stroke-width="4">BRISTOL</text>
+      <path d="M300,447 h24 M356,447 h24" stroke="#d9bc6f" stroke-width="1" opacity="0.8"/>
+      <path d="M340,444 l3,3 l-3,3 l-3,-3 Z" fill="#eed389" transform="translate(0,0)"/>
+    </g>
+  </g>
+
+  <!-- map plate border -->
+  <rect x="60" y="150" width="880" height="505" fill="none" stroke="#c9a24b" stroke-width="1.2" opacity="0.65"/>
+
+  <!-- ================= LEGEND CARTOUCHE ================= -->
+  <g transform="translate(716,450)">
+    <rect x="0" y="0" width="212" height="198" fill="#0e211b" opacity="0.93"/>
+    <rect x="0" y="0" width="212" height="198" fill="none" stroke="url(#goldGrad)" stroke-width="2.2"/>
+    <rect x="5" y="5" width="202" height="188" fill="none" stroke="#c9a24b" stroke-width="0.8" opacity="0.8"/>
+    <text x="106" y="26" class="display" text-anchor="middle" font-size="14" letter-spacing="3.5"
+          fill="url(#goldGradH)">SCALE OF PASSAGE</text>
+    <path d="M26,34 h60 M126,34 h60" stroke="#c9a24b" stroke-width="1"/>
+    <path d="M106,30 l4,4 l-4,4 l-4,-4 Z" fill="#eed389"/>
+    <g id="legendRows" class="display" font-size="11.5" letter-spacing="1.8" fill="#efe3c3"></g>
+  </g>
+
+  <!-- ================= TITLE BLOCK ================= -->
+  <g text-anchor="middle" class="display">
+    <text x="500" y="86" font-size="42" letter-spacing="8" fill="url(#goldGrad)"
+          textLength="800" lengthAdjust="spacingAndGlyphs"
+          style="paint-order:stroke" stroke="#050b09" stroke-width="1.2">ISOCHRONIC PASSAGE CHART</text>
+    <!-- subtitle with deco rules -->
+    <text x="500" y="122" font-size="15" letter-spacing="4" fill="#efe3c3"
+          textLength="470" lengthAdjust="spacingAndGlyphs">SHORTEST JOURNEY TIMES FROM BRISTOL</text>
+    <g stroke="#c9a24b" stroke-width="1.1">
+      <path d="M96,117 H240"/><path d="M760,117 H904"/>
+    </g>
+    <g fill="#eed389">
+      <path d="M248,117 l5,-4 l5,4 l-5,4 Z"/>
+      <path d="M742,117 l5,-4 l5,4 l-5,4 Z"/>
+    </g>
+    <!-- small chevrons over title -->
+    <g stroke="url(#goldGradH)" stroke-width="1.4" fill="none">
+      <path d="M470,40 l30,-8 l30,8" opacity="0.9"/>
+      <path d="M478,46 l22,-6 l22,6" opacity="0.55"/>
+    </g>
+  </g>
+
+  <!-- ================= CAPTION ================= -->
+  <g text-anchor="middle">
+    <text x="500" y="692" class="serif" font-size="12.5" letter-spacing="2" fill="#d9c9a0" opacity="0.92"
+          textLength="700" lengthAdjust="spacingAndGlyphs">ISSUED BY THE JETSPAN LINES &#183; CHART N&#186; 3, EUROPE &#183; ALL PASSAGE TIMES BY THE SWIFTEST PUBLIC CONVEYANCE</text>
+    <text x="500" y="712" class="display" font-size="11" letter-spacing="6" fill="url(#goldGradH)">MCMXXXIV</text>
+    <g fill="#c9a24b" opacity="0.9">
+      <path d="M410,708 l4,-3 l4,3 l-4,3 Z"/>
+      <path d="M582,708 l4,-3 l4,3 l-4,3 Z"/>
+    </g>
+  </g>
+
+  <!-- ================= FRAME ================= -->
+  <rect x="16" y="16" width="968" height="718" fill="none" stroke="url(#goldGrad)" stroke-width="3"/>
+  <rect x="27" y="27" width="946" height="696" fill="none" stroke="#c9a24b" stroke-width="1.1" opacity="0.9"/>
+  <use href="#corner" transform="translate(20,20)"/>
+  <use href="#corner" transform="translate(980,20) scale(-1,1)"/>
+  <use href="#corner" transform="translate(20,730) scale(1,-1)"/>
+  <use href="#corner" transform="translate(980,730) scale(-1,-1)"/>
+
+  <!-- vignette + grain -->
+  <rect x="0" y="0" width="1000" height="750" fill="url(#vig)"/>
+  <rect x="0" y="0" width="1000" height="750" filter="url(#grain)" opacity="0.055"/>
+</svg>
+</div>
+
+<script>
+/* synchronous one-time SVG generation: isochrone band blobs, ring guides,
+   sunburst rays, legend rows. deterministic — no timers, no fetch, no animation. */
+(function(){
+  var NS='http://www.w3.org/2000/svg';
+  var OX=340, OY=400;                       // Bristol origin
+
+  // near -> far : monotonic green -> light-green -> yellow -> amber -> terracotta -> deep red/near-black
+  var BANDS=[
+    {r:60,  c:'#3f7d68', t:'UNDER 3 HOURS'},
+    {r:130, c:'#5f9260', t:'3 – 6 HOURS'},
+    {r:190, c:'#93a35b', t:'6 – 10 HOURS'},
+    {r:270, c:'#cdb45f', t:'10 – 15 HOURS'},
+    {r:350, c:'#cd8b4a', t:'15 – 22 HOURS'},
+    {r:440, c:'#a95836', t:'22 – 32 HOURS'},
+    {r:0,   c:'#421a11', t:'BEYOND 32 HOURS'}   // base landmass fill (drawn statically)
+  ];
+
+  function el(name,attrs,parent){
+    var e=document.createElementNS(NS,name);
+    for(var k in attrs) e.setAttribute(k,attrs[k]);
+    parent.appendChild(e); return e;
+  }
+
+  // gently-irregular time band: wobbled circle, catmull-rom smoothed.
+  // wobble ~4.8% of r << inter-band gaps, so bands stay nested + monotonic.
+  function blobPath(r,seed){
+    var n=64,pts=[],i,a,w;
+    for(i=0;i<n;i++){
+      a=i/n*Math.PI*2;
+      w=1+0.048*Math.sin(3*a+seed*1.7)
+         +0.030*Math.sin(5*a+seed*2.63+1.1)
+         +0.016*Math.sin(9*a+seed*3.9);
+      pts.push([OX+r*w*Math.cos(a), OY+r*w*Math.sin(a)]);
+    }
+    var d='M'+pts[0][0].toFixed(1)+','+pts[0][1].toFixed(1);
+    for(i=0;i<n;i++){
+      var p0=pts[(i-1+n)%n],p1=pts[i],p2=pts[(i+1)%n],p3=pts[(i+2)%n];
+      var c1x=p1[0]+(p2[0]-p0[0])/6, c1y=p1[1]+(p2[1]-p0[1])/6;
+      var c2x=p2[0]-(p3[0]-p1[0])/6, c2y=p2[1]-(p3[1]-p1[1])/6;
+      d+='C'+c1x.toFixed(1)+','+c1y.toFixed(1)+' '+c2x.toFixed(1)+','+c2y.toFixed(1)
+        +' '+p2[0].toFixed(1)+','+p2[1].toFixed(1);
+    }
+    return d+'Z';
+  }
+
+  // band fills, largest first (clipped to landmass)
+  var bandsG=document.getElementById('bandsG');
+  for(var i=5;i>=0;i--){
+    el('path',{d:blobPath(BANDS[i].r,i),fill:BANDS[i].c,
+               stroke:'rgba(14,20,12,0.38)','stroke-width':1},bandsG);
+  }
+
+  // engraved ring guides: same wobble, stroked over sea + land
+  var ringsG=document.getElementById('ringsG');
+  for(i=0;i<6;i++){
+    el('path',{d:blobPath(BANDS[i].r,i),fill:'none',stroke:'#e6c87a',
+               'stroke-width':0.9,opacity:0.22},ringsG);
+  }
+
+  // deco sunburst rays from the origin medallion
+  var raysG=document.getElementById('raysG');
+  for(var k=0;k<32;k++){
+    var a=k/32*Math.PI*2+0.098;
+    var major=(k%4===0), L=major?470:320;
+    el('line',{x1:OX+72*Math.cos(a),y1:OY+72*Math.sin(a),
+               x2:OX+L*Math.cos(a), y2:OY+L*Math.sin(a),
+               stroke:'#d9bc6f','stroke-width':major?1.2:0.8,
+               opacity:major?0.17:0.08},raysG);
+  }
+
+  // legend rows: hexagonal deco chips, near (top) -> far (bottom)
+  var lg=document.getElementById('legendRows');
+  for(i=0;i<7;i++){
+    var y=50+i*21;
+    el('path',{d:'M'+(22)+','+y+' l4,-6 h24 l4,6 l-4,6 h-24 Z',
+               fill:BANDS[i].c,stroke:'#d9bc6f','stroke-width':0.9},lg);
+    var t=el('text',{x:64,y:y+4},lg);
+    t.textContent=BANDS[i].t;
+  }
+})();
+</script>
+</body>
+</html>

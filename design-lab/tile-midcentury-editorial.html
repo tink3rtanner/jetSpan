@@ -1,0 +1,289 @@
+<title>How far can you get from Bristol?</title>
+<style>
+  /* ============================================================
+     isochrone passage chart — editorial data-graphics tile
+     design language: NYT/FT/Economist house style.
+     fixed 1000x750 artboard, fully self-contained, no network.
+     ============================================================ */
+  html, body { margin:0; padding:0; background:#e4e4e0; }
+  #tile {
+    position:relative; width:1000px; height:750px;
+    background:#fdfdfb;                       /* warm paper white */
+    overflow:hidden; box-sizing:border-box;
+    font-family: Arial, Helvetica, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* thin accent rule across the top — single accent (band-1 green) */
+  #tile .toprule { position:absolute; top:0; left:0; width:1000px; height:3px; background:#1a7f47; }
+
+  /* ---- header block: kicker / hed / dek (serif hed, sans everything else) ---- */
+  .kicker {
+    position:absolute; top:32px; left:52px;
+    font-size:11px; font-weight:bold; letter-spacing:2px; color:#1a7f47;
+  }
+  .hed {
+    position:absolute; top:50px; left:52px; width:580px;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size:31px; font-weight:bold; line-height:1.12; color:#141414;
+  }
+  .dek {
+    position:absolute; top:96px; left:52px; width:560px;
+    font-size:14.5px; color:#575757; line-height:1.35;
+  }
+
+  /* ---- legend: discrete swatch ramp, top-right, quiet ---- */
+  .legend { position:absolute; top:42px; right:52px; width:294px; }
+  .legend .lt {
+    font-size:10px; font-weight:bold; letter-spacing:1.2px; color:#6b6b6b;
+    margin-bottom:7px; text-align:left;
+  }
+  .legend .row { display:flex; }
+  .legend .cell { width:42px; }
+  .legend .sw { height:11px; border-right:1px solid #fdfdfb; }   /* white gap echoes isolines */
+  .legend .cell:last-child .sw { border-right:none; }
+  .legend .tl { font-size:9.5px; color:#6b6b6b; text-align:center; padding-top:4px; }
+
+  /* ---- map svg ---- */
+  #map { position:absolute; top:152px; left:0; }
+
+  /* ---- svg text classes ---- */
+  text { font-family: Arial, Helvetica, system-ui, sans-serif; }
+  .lbl  {  /* city label, white knockout halo for legibility over busy bands */
+    font-size:12.5px; font-weight:bold; fill:#1d1d1b;
+    paint-order:stroke; stroke:#ffffff; stroke-width:3px; stroke-linejoin:round;
+  }
+  .lblD {  /* dark-background variant (far bands): white ink, deep halo */
+    font-size:12.5px; font-weight:bold; fill:#ffffff;
+    paint-order:stroke; stroke:#4a0b06; stroke-width:3px; stroke-linejoin:round;
+  }
+  .origin-tag {
+    font-size:8.5px; font-weight:bold; letter-spacing:1.4px; fill:#5b6b70;
+    paint-order:stroke; stroke:#ffffff; stroke-width:2.5px; stroke-linejoin:round;
+  }
+  .sea-name {
+    font-family: Georgia, serif; font-style:italic;
+    font-size:10.5px; letter-spacing:2.4px; fill:#9db0b5;
+  }
+  .iso {   /* small hour labels sitting on the isolines over open sea */
+    font-family: Georgia, serif; font-style:italic; font-size:10px; fill:#5f7076;
+    paint-order:stroke; stroke:#e9f0f1; stroke-width:4px; stroke-linejoin:round;
+  }
+  .anno {  /* editorial annotation, serif italic, haloed */
+    font-family: Georgia, serif; font-style:italic; font-size:12.5px; fill:#3f4a4e;
+    paint-order:stroke; stroke:#e9f0f1; stroke-width:3.5px; stroke-linejoin:round;
+  }
+  .annoD { /* annotation over the dark far bands */
+    font-family: Georgia, serif; font-style:italic; font-size:12.5px; fill:#ffffff;
+    paint-order:stroke; stroke:#4a0b06; stroke-width:3px; stroke-linejoin:round;
+  }
+
+  /* ---- footer / source line ---- */
+  .source {
+    position:absolute; left:52px; right:52px; bottom:24px;
+    border-top:1px solid #dcdcd6; padding-top:8px;
+    font-size:10.5px; color:#8a8a84;
+  }
+</style>
+
+<div id="tile">
+  <div class="toprule"></div>
+
+  <div class="kicker">ISOCHRONIC PASSAGE CHART</div>
+  <div class="hed">How far can you get from Bristol?</div>
+  <div class="dek">Shortest journey times, by colour band</div>
+
+  <!-- discrete legend: band -> hours. cells filled by script from the same ramp -->
+  <div class="legend">
+    <div class="lt">JOURNEY TIME FROM BRISTOL, IN HOURS</div>
+    <div class="row" id="legend-sw"></div>
+    <div class="row" id="legend-tl"></div>
+  </div>
+
+  <svg id="map" width="1000" height="520" viewBox="0 0 1000 520" aria-label="Isochrone map of journey times from Bristol across western Europe">
+    <defs>
+      <!-- abstract landmass silhouettes: reads as "a continent", not a survey map -->
+      <path id="pGB" d="M 285 70 C 300 74 306 90 298 102 C 312 112 314 132 302 140
+        C 320 150 330 168 326 184 C 344 192 356 206 354 220 C 360 232 352 246 338 250
+        C 322 256 306 250 300 244 C 288 254 272 252 266 244 C 252 256 232 260 220 254
+        C 214 248 222 240 232 238 C 244 232 254 234 258 228 C 250 222 246 208 256 200
+        C 246 192 246 176 258 170 C 250 158 252 142 264 136 C 254 124 256 106 266 98
+        C 268 84 274 72 285 70 Z"/>
+      <path id="pIE" d="M 168 148 C 184 142 198 150 196 166 C 206 176 202 194 190 200
+        C 180 210 162 208 154 198 C 144 190 146 174 156 168 C 152 158 158 150 168 148 Z"/>
+      <path id="pSC" d="M 632 0 C 636 24 646 48 660 62 C 676 76 698 82 716 76
+        C 736 84 758 80 770 66 C 782 52 788 28 788 0 Z"/>
+      <path id="pEU" d="M 318 310
+        C 334 300 352 302 360 310 C 374 296 392 288 404 292 C 414 278 432 270 446 274
+        C 458 262 476 256 488 262 C 496 248 514 240 526 246 C 536 230 552 224 562 232
+        C 566 218 560 204 566 192 C 576 178 590 178 596 192 C 602 206 598 220 606 228
+        C 622 222 642 226 652 238 C 672 232 694 236 706 248 C 730 240 756 232 772 216
+        C 788 200 806 192 826 190 C 846 186 866 176 878 160 C 890 142 906 132 922 130
+        L 1000 122 L 1000 520 L 736 520
+        C 726 500 732 484 744 474 C 730 462 718 448 720 434 C 712 418 700 406 686 400
+        C 676 408 672 422 676 436 C 682 452 680 470 672 486 C 664 498 650 502 644 494
+        C 636 484 642 470 634 458 C 624 444 610 436 604 420 C 596 404 596 388 586 378
+        C 572 372 556 376 544 388 C 530 396 516 396 504 404 C 492 412 486 424 474 428
+        C 466 440 468 456 460 470 C 454 486 446 504 444 520 L 330 520
+        C 326 500 318 484 320 466 C 312 448 306 430 310 412 C 320 400 336 396 348 402
+        C 362 408 376 410 388 404 C 406 398 422 390 426 374 C 430 356 422 338 410 328
+        C 398 320 382 318 368 318 C 352 316 334 318 318 310 Z"/>
+      <!-- mediterranean islands, purely for cartographic charm -->
+      <ellipse id="pCO" cx="566" cy="424" rx="7"  ry="12"/>
+      <ellipse id="pSA" cx="556" cy="466" rx="9"  ry="15"/>
+      <ellipse id="pSI" cx="646" cy="504" rx="15" ry="8"/>
+      <ellipse id="pBA" cx="472" cy="476" rx="8"  ry="5"/>
+
+      <!-- everything painted with band colour is clipped to land -->
+      <clipPath id="landClip">
+        <use href="#pGB"/><use href="#pIE"/><use href="#pSC"/><use href="#pEU"/>
+        <use href="#pCO"/><use href="#pSA"/><use href="#pSI"/><use href="#pBA"/>
+      </clipPath>
+    </defs>
+
+    <!-- 1. quiet sea -->
+    <rect x="0" y="0" width="1000" height="520" fill="#e9f0f1"/>
+
+    <!-- 2. isolines continue over open water as faint dashed rings (filled by script) -->
+    <g id="sea-rings" fill="none" stroke="#aebfc4" stroke-width="1" stroke-dasharray="2 4"></g>
+
+    <!-- 3. land, filled with the time bands (script paints back-to-front, clipped) -->
+    <g clip-path="url(#landClip)">
+      <rect x="0" y="0" width="1000" height="520" fill="#f7f5f0"/>  <!-- land base -->
+      <g id="band-fills" fill-opacity="0.92"></g>
+      <g id="band-lines" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-opacity="0.9"></g>
+    </g>
+
+    <!-- 4. crisp white coastline separates coloured land from pale sea -->
+    <g fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round">
+      <use href="#pGB"/><use href="#pIE"/><use href="#pSC"/><use href="#pEU"/>
+      <use href="#pCO"/><use href="#pSA"/><use href="#pSI"/><use href="#pBA"/>
+    </g>
+
+    <!-- 5. sea names, whisper-quiet -->
+    <text class="sea-name" x="80" y="296" text-anchor="middle">ATLANTIC</text>
+    <text class="sea-name" x="80" y="312" text-anchor="middle">OCEAN</text>
+    <text class="sea-name" x="425" y="70"  text-anchor="middle">NORTH SEA</text>
+    <text class="sea-name" x="520" y="509" text-anchor="start">MEDITERRANEAN</text>
+
+    <!-- 6. hour labels riding the isolines over the atlantic (filled by script) -->
+    <g id="iso-labels"></g>
+
+    <!-- 7. annotations: two, subtle, guiding the eye near and far -->
+    <g>
+      <text class="anno" x="452" y="96">Within six hours of Bristol:</text>
+      <text class="anno" x="452" y="112">London, Paris and the Low Countries</text>
+      <path d="M 470 122 C 452 160 440 196 434 240" fill="none" stroke="#8a9599" stroke-width="1"/>
+      <circle cx="434" cy="240" r="1.8" fill="#8a9599"/>
+    </g>
+    <g>
+      <text class="annoD" x="972" y="292" text-anchor="end">Beyond the 32-hour line,</text>
+      <text class="annoD" x="972" y="308" text-anchor="end">journeys are measured in</text>
+      <text class="annoD" x="972" y="324" text-anchor="end">days, not hours</text>
+    </g>
+
+    <!-- 8. cities: dots + haloed labels. moscow gets the dark-band variant -->
+    <g>
+      <!-- origin: ringed dot -->
+      <circle cx="270" cy="235" r="7.5" fill="none" stroke="#1d1d1b" stroke-width="2"/>
+      <circle cx="270" cy="235" r="2.8" fill="#1d1d1b"/>
+      <text class="lbl" x="270" y="222" text-anchor="middle" font-size="13.5">Bristol</text>
+      <text class="origin-tag" x="270" y="256" text-anchor="middle">ORIGIN</text>
+
+      <circle cx="350" cy="220" r="3.2" fill="#1d1d1b" stroke="#ffffff" stroke-width="1.4"/>
+      <text class="lbl" x="358" y="224">London</text>
+
+      <circle cx="405" cy="300" r="3.2" fill="#1d1d1b" stroke="#ffffff" stroke-width="1.4"/>
+      <text class="lbl" x="413" y="304">Paris</text>
+
+      <circle cx="610" cy="262" r="3.2" fill="#1d1d1b" stroke="#ffffff" stroke-width="1.4"/>
+      <text class="lbl" x="618" y="266">Berlin</text>
+
+      <circle cx="390" cy="478" r="3.2" fill="#1d1d1b" stroke="#ffffff" stroke-width="1.4"/>
+      <text class="lbl" x="398" y="482">Madrid</text>
+
+      <circle cx="615" cy="425" r="3.2" fill="#1d1d1b" stroke="#ffffff" stroke-width="1.4"/>
+      <text class="lbl" x="623" y="429">Rome</text>
+
+      <circle cx="890" cy="172" r="3.2" fill="#ffffff" stroke="#1d1d1b" stroke-width="1.4"/>
+      <text class="lblD" x="881" y="176" text-anchor="end">Moscow</text>
+    </g>
+  </svg>
+
+  <div class="source">
+    Times are shortest scheduled journeys by rail, sea and road; band boundaries are indicative.
+    &nbsp;Source: JetSpan journey-time model, 2026&ensp;&middot;&ensp;Graphic: JetSpan Design Lab
+  </div>
+</div>
+
+<script>
+/* one-time synchronous SVG generation: the seven time bands as gently-irregular
+   nested blobs around the origin. no timers, no animation, no fetch. */
+(function () {
+  var CX = 270, CY = 235;          // bristol, map coords
+  var K  = 0.8;                    // vertical squash: bands are soft ellipses, not circles
+
+  // outer radius of bands 1..6 (band 7 = everything beyond r6)
+  var RINGS = [115, 225, 320, 420, 505, 590];
+
+  // monotonic sequential ramp, colorbrewer RdYlGn-derived, reversed:
+  // green -> light green -> yellow-green -> yellow -> orange -> red -> deep red.
+  // no hue reversals, nothing blue/purple. continent reads mostly green->yellow.
+  var COLS  = ['#1a9850', '#66bd63', '#a6d96a', '#fee08b', '#fdae61', '#d73027'];
+  var FAR   = '#5f0c06';           // 32h+: deep red, near-black
+  var TIMES = ['<3', '3–6', '6–10', '10–15', '15–22', '22–32', '32+'];
+
+  // deterministic organic perturbation. shared harmonics keep the rings nested
+  // (R is strictly increasing in r for every angle); the (r/530) term lets the
+  // outer rings wander a little more than the inner ones.
+  function noise(t, r) {
+    return 0.035 * Math.sin(3 * t + 0.7)
+         + 0.020 * Math.sin(5 * t + 2.3)
+         + 0.025 * Math.sin(2 * t + 4.2)
+         + (r / 530) * 0.02 * Math.sin(4 * t + 1.6);
+  }
+  function pt(t, r) {
+    var R = r * (1 + noise(t, r));
+    return [CX + R * Math.cos(t), CY + K * R * Math.sin(t)];
+  }
+  function blobPath(r) {
+    var d = '';
+    for (var i = 0; i <= 144; i++) {
+      var p = pt(i / 144 * 2 * Math.PI, r);
+      d += (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1);
+    }
+    return d + 'Z';
+  }
+
+  // band fills, painted back-to-front so each disc reveals only its own band
+  var fills = '<rect x="0" y="0" width="1000" height="520" fill="' + FAR + '"/>';
+  for (var i = RINGS.length - 1; i >= 0; i--) {
+    fills += '<path d="' + blobPath(RINGS[i]) + '" fill="' + COLS[i] + '"/>';
+  }
+  document.getElementById('band-fills').innerHTML = fills;
+
+  // thin white isolines between bands (on land) + faint dashed ghosts (over sea)
+  var lines = '';
+  for (var j = 0; j < RINGS.length; j++) lines += '<path d="' + blobPath(RINGS[j]) + '"/>';
+  document.getElementById('band-lines').innerHTML = lines;
+  document.getElementById('sea-rings').innerHTML  = lines;
+
+  // small hour labels where the inner isolines cross open atlantic (sw of origin)
+  var isoTags = [[115, '3 hrs', 2.42], [225, '6 hrs', 2.42], [320, '10 hrs', 2.1]];
+  var isoHtml = '';
+  for (var k = 0; k < isoTags.length; k++) {
+    var q = pt(isoTags[k][2], isoTags[k][0]);
+    isoHtml += '<text class="iso" x="' + q[0].toFixed(1) + '" y="' + (q[1] + 3.5).toFixed(1) +
+               '" text-anchor="middle">' + isoTags[k][1] + '</text>';
+  }
+  document.getElementById('iso-labels').innerHTML = isoHtml;
+
+  // legend cells from the same ramp (single source of truth for colour)
+  var all = COLS.concat([FAR]), sw = '', tl = '';
+  for (var m = 0; m < 7; m++) {
+    sw += '<div class="cell"><div class="sw" style="background:' + all[m] + '"></div></div>';
+    tl += '<div class="cell"><div class="tl">' + TIMES[m] + '</div></div>';
+  }
+  document.getElementById('legend-sw').innerHTML = sw;
+  document.getElementById('legend-tl').innerHTML = tl;
+})();
+</script>
