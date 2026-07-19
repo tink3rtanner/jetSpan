@@ -23,6 +23,18 @@ no build step. all deps loaded via CDN (MapLibre GL JS v5, H3-js v4.1).
 
 See `docs/PERFORMANCE.md` for scenario coverage and comparison guidance.
 
+## Pages versions
+
+The Settings panel links the published `main` build and selected branch previews. The picker
+keeps the current center, zoom, bearing, and pitch when you switch builds.
+
+`pages-versions.json` defines the visible versions. The Pages workflow publishes `main` at the
+site root and each preview at its configured path. After merging the workflow, set the repository's
+Pages source to **GitHub Actions** under **Settings → Pages**.
+
+To add a preview, add its label, branch, and path to `pages-versions.json`, then include the branch
+in the workflow's `push.branches` list. A preview path must be relative and end with `/`.
+
 ## How It Works
 
 ### System Overview

@@ -1,0 +1,17 @@
+{
+  "default": "main",
+  "versions": [
+    {
+      "id": "main",
+      "label": "Main",
+      "branch": "main",
+      "path": ""
+    },
+    {
+      "id": "performance",
+      "label": "Performance",
+      "branch": "codex/performance-bench",
+      "path": "versions/performance/"
+    }
+  ]
+}

@@ -209,6 +209,13 @@
       opacity: 0.7;
     }
 
+    .version-note {
+      margin-top: 6px;
+      color: #888;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
     .slider-row input[type="range"] {
       width: 100%;
       height: 4px;
@@ -669,6 +676,7 @@
 
     body.theme-vintage .stat-value { color: #2e2417; }
     body.theme-vintage .stat-label { color: #8a7354; }
+    body.theme-vintage .version-note { color: #7a6748; }
 
     body.theme-vintage .loading-overlay {
       background: rgba(230, 217, 189, 0.96);
@@ -714,6 +722,7 @@
     body.theme-modern .loading-text,
     body.theme-modern .breakdown-row .label,
     body.theme-modern .stat-label { color: #64748b; }
+    body.theme-modern .version-note { color: #64748b; }
 
     body.theme-modern .info-btn {
       background: rgba(255, 255, 255, 0.92);
@@ -867,6 +876,16 @@
           <div class="stat-label">Version</div>
         </div>
       </div>
+    </div>
+    <div class="info-section">
+      <div class="info-section-label">App Version</div>
+      <div class="toggle-row">
+        <span>Build</span>
+        <select class="theme-select" id="version-select" disabled>
+          <option value="main">Main (default)</option>
+        </select>
+      </div>
+      <div class="version-note" id="version-note">Loading published versions…</div>
     </div>
     <div class="info-section">
       <div class="info-section-label">Display Options</div>
@@ -2486,10 +2505,103 @@ function refreshGridDerived() {
 // MAP INITIALIZATION
 // =============================================================================
 
+function getPagesRootURL(url = new URL(window.location.href)) {
+  const previewMarker = '/versions/';
+  const previewIndex = url.pathname.indexOf(previewMarker);
+  const rootPath = previewIndex >= 0
+    ? url.pathname.slice(0, previewIndex + 1)
+    : url.pathname.slice(0, url.pathname.lastIndexOf('/') + 1);
+  return new URL(rootPath, url.origin);
+}
+
+function readSharedCamera(search = window.location.search) {
+  const params = new URLSearchParams(search);
+  const numberParam = name => params.has(name) ? Number(params.get(name)) : NaN;
+  const lng = numberParam('lng');
+  const lat = numberParam('lat');
+  const zoom = numberParam('zoom');
+  const bearing = numberParam('bearing');
+  const pitch = numberParam('pitch');
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180 ||
+      !Number.isFinite(lat) || lat < -85 || lat > 85 ||
+      !Number.isFinite(zoom) || zoom < 0 || zoom > 12) return null;
+  return {
+    center: [lng, lat],
+    zoom,
+    bearing: Number.isFinite(bearing) ? bearing : 0,
+    pitch: Number.isFinite(pitch) ? Math.max(0, Math.min(60, pitch)) : null,
+  };
+}
+
+const sharedCamera = readSharedCamera();
+
+async function initVersionPicker() {
+  const select = document.getElementById('version-select');
+  const note = document.getElementById('version-note');
+  const root = getPagesRootURL();
+  try {
+    const configURLs = [
+      new URL('pages-versions.json', root),
+      new URL('pages-versions.json', window.location.href),
+    ].filter((url, index, urls) => urls.findIndex(candidate => candidate.href === url.href) === index);
+    let response = null;
+    for (const configURL of configURLs) {
+      const candidate = await fetch(configURL, { cache: 'no-cache' });
+      if (candidate.ok) { response = candidate; break; }
+    }
+    if (!response) throw new Error('configuration not found');
+    const config = await response.json();
+    if (!Array.isArray(config.versions) || config.versions.length === 0) {
+      throw new Error('no versions configured');
+    }
+
+    select.replaceChildren(...config.versions.map(version => {
+      const option = document.createElement('option');
+      option.value = version.id;
+      option.textContent = version.id === config.default
+        ? `${version.label} (default)` : version.label;
+      return option;
+    }));
+
+    const relativePath = decodeURIComponent(window.location.pathname.slice(root.pathname.length));
+    const current = config.versions
+      .filter(version => version.path && relativePath.startsWith(version.path))
+      .sort((a, b) => b.path.length - a.path.length)[0] ||
+      config.versions.find(version => version.id === config.default) || config.versions[0];
+    select.value = current.id;
+    select.disabled = false;
+    note.textContent = `Published from ${current.branch}`;
+
+    select.addEventListener('change', () => {
+      const target = config.versions.find(version => version.id === select.value);
+      if (!target || target.id === current.id) return;
+      const targetURL = new URL(`${target.path}isochrone.html`, root);
+      const params = new URLSearchParams(window.location.search);
+      if (typeof map !== 'undefined' && map) {
+        const center = map.getCenter();
+        params.set('lng', center.lng.toFixed(5));
+        params.set('lat', center.lat.toFixed(5));
+        params.set('zoom', map.getZoom().toFixed(3));
+        params.set('bearing', map.getBearing().toFixed(2));
+        params.set('pitch', map.getPitch().toFixed(2));
+      }
+      targetURL.search = params.toString();
+      window.location.assign(targetURL);
+    });
+
+    return { ready: true, config, current, root: root.href };
+  } catch (error) {
+    select.disabled = true;
+    note.textContent = 'Version links unavailable';
+    console.warn('[JetSpan] Version picker:', error.message);
+    return { ready: false, error: error.message, root: root.href };
+  }
+}
+
 let map;
 let currentOrigin = 'bristol';
 let gridData = null;
-let currentResolution = 3;
+let currentResolution = getResolutionForZoom(sharedCamera?.zoom ?? 2);
 let isUpdatingGrid = false;
 let pendingGridUpdate = null;
 let showOSRMCoverage = false;  // toggle: red/green hexes by OSRM coverage
@@ -2523,9 +2635,10 @@ async function initMap() {
   map = new maplibregl.Map({
     container: 'map',
     style: THEMES[currentTheme].basemap,
-    center: ORIGINS[currentOrigin].coordinates,
-    zoom: 2,
-    pitch: THEMES[currentTheme].pitch || 0,
+    center: sharedCamera?.center || ORIGINS[currentOrigin].coordinates,
+    zoom: sharedCamera?.zoom ?? 2,
+    bearing: sharedCamera?.bearing ?? 0,
+    pitch: sharedCamera?.pitch ?? THEMES[currentTheme].pitch ?? 0,
   });
   window.map = map; // test/render hook: lets the headless render harness drive the camera
   // Projection is per-theme: globe by default, but the relief theme uses
@@ -2705,7 +2818,9 @@ async function initMap() {
     });
 
     // Generate initial grid
-    updateGrid();
+    updateGrid(currentResolution, !sharedCamera).finally(() => {
+      document.getElementById('loading').classList.add('hidden');
+    });
   });
 }
 
@@ -4050,6 +4165,24 @@ async function runTests() {
     assert(document.querySelectorAll('.pin-card').length === 0, 'cards cleared from DOM');
   }
 
+  // === 18. PAGES VERSION PICKER ===
+  show('\n─── 18. Pages Version Picker ───');
+  {
+    const versionState = await window.versionPickerReady;
+    const select = document.getElementById('version-select');
+    assert(versionState.ready, 'version configuration loaded');
+    assert(versionState.config.default === 'main', 'main is the default version');
+    assert(select.options.length >= 2, 'main and preview versions listed');
+    assert(getPagesRootURL(new URL('https://example.test/jetSpan/isochrone.html')).pathname === '/jetSpan/',
+      'main URL resolves Pages root');
+    assert(getPagesRootURL(new URL(
+      'https://example.test/jetSpan/versions/performance/isochrone.html')).pathname === '/jetSpan/',
+      'preview URL resolves Pages root');
+    const shared = readSharedCamera('?lng=2.35&lat=48.86&zoom=6.5&bearing=20&pitch=30');
+    assert(shared?.zoom === 6.5 && shared.center[0] === 2.35,
+      'shared camera parameters restore comparison view');
+  }
+
   // === SUMMARY ===
   show('\n' + '═'.repeat(50));
   if (results.fail === 0) {
@@ -4496,6 +4629,7 @@ document.getElementById('linestyle-select').addEventListener('change', (e) => {
 // Initialize — apply saved/default theme chrome BEFORE the map spins up
 // (initMap reads THEMES[currentTheme].basemap; layer paint reads it on load)
 applyThemeChrome(currentTheme);
+window.versionPickerReady = initVersionPicker();
 initMap();
 </script>
 </body>

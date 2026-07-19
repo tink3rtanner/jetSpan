@@ -421,6 +421,29 @@ async function runTests() {
         results.fail++;
     }
 
+    // === 12. PAGES VERSION CONFIGURATION ===
+    log('\n─── 12. Pages Version Configuration ───');
+    try {
+        const versionResp = await fetch('pages-versions.json', {cache: 'no-cache'});
+        assert(versionResp.ok, 'pages-versions.json loads');
+        const config = await versionResp.json();
+        assert(config.default === 'main', 'main is the default published version');
+        const ids = config.versions.map(version => version.id);
+        assert(new Set(ids).size === ids.length, 'version IDs are unique');
+        const main = config.versions.find(version => version.id === 'main');
+        const performance = config.versions.find(version => version.id === 'performance');
+        assert(main?.branch === 'main' && main.path === '', 'main publishes at the site root');
+        assert(performance?.branch === 'codex/performance-bench' &&
+            performance.path === 'versions/performance/', 'performance preview path is configured');
+        assert(config.versions.every(version =>
+            !version.path.startsWith('/') && !version.path.includes('..') &&
+            (version.path === '' || version.path.endsWith('/'))),
+            'version paths are safe and relative');
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
     // === SUMMARY ===
     log('\n' + '═'.repeat(60));
     if (results.fail === 0) {

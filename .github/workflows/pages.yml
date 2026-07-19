@@ -1,0 +1,82 @@
+name: Deploy versioned Pages site
+
+on:
+  push:
+    branches:
+      - main
+      - codex/performance-bench
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          path: source
+
+      - name: Assemble main and preview versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          config="source/pages-versions.json"
+          publish="${RUNNER_TEMP}/pages"
+          mkdir -p "$publish"
+
+          git -C source fetch --no-tags --depth=1 origin \
+            '+refs/heads/*:refs/remotes/origin/*'
+
+          default_id="$(jq -r '.default' "$config")"
+          default_branch="$(jq -r --arg id "$default_id" \
+            '.versions[] | select(.id == $id) | .branch' "$config")"
+          if [[ -z "$default_branch" || "$default_branch" == "null" ]]; then
+            echo "Default version has no branch" >&2
+            exit 1
+          fi
+          git -C source archive "origin/${default_branch}" | tar -xf - -C "$publish"
+
+          while IFS=$'\t' read -r id branch path; do
+            [[ "$id" == "$default_id" ]] && continue
+            if [[ ! "$id" =~ ^[A-Za-z0-9._-]+$ ||
+                  ! "$branch" =~ ^[A-Za-z0-9._/-]+$ ||
+                  "$path" == /* || "$path" == *..* || "$path" != */ ]]; then
+              echo "Unsafe version entry: ${id} ${branch} ${path}" >&2
+              exit 1
+            fi
+            target="${publish}/${path%/}"
+            mkdir -p "$target"
+            git -C source archive "origin/${branch}" | tar -xf - -C "$target"
+          done < <(jq -r '.versions[] | [.id, .branch, .path] | @tsv' "$config")
+
+          touch "$publish/.nojekyll"
+          du -sh "$publish"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/pages
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
