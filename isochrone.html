@@ -555,6 +555,29 @@
       color: #3a2f22;
     }
 
+    /* pin cards join the parchment panel family (they shipped dark from the
+       click-to-pin branch, which predates the vintage-everywhere lock) */
+    body.theme-vintage .pin-card {
+      background: rgba(243, 234, 212, 0.94);
+      backdrop-filter: none;
+      border: 1px solid #a3812e; /* antique gold — matches pinned hex outline */
+      border-radius: 2px;
+      box-shadow:
+        inset 0 0 0 3px rgba(243, 234, 212, 1),
+        inset 0 0 0 4px rgba(163, 129, 46, 0.55),
+        0 1px 6px rgba(60, 40, 15, 0.25);
+      color: #3a2f22;
+    }
+    body.theme-vintage .pin-card-close { color: #8a765a; }
+    body.theme-vintage .pin-card-close:hover { color: #2e2417; }
+    body.theme-vintage .pin-cards-hint {
+      background: rgba(243, 234, 212, 0.9);
+      color: #6b5a41;
+      border: 1px solid rgba(107, 86, 56, 0.4);
+      border-radius: 2px;
+      font-style: italic;
+    }
+
     body.theme-vintage .title-panel h1 {
       font-family: inherit;
       font-variant: small-caps;
@@ -831,9 +854,9 @@
       <div class="slider-row">
         <div class="slider-header">
           <span>Color scale</span>
-          <span class="slider-value" id="color-scale-label">1.8×</span>
+          <span class="slider-value" id="color-scale-label">2×</span>
         </div>
-        <input type="range" id="color-scale" min="0.5" max="4" step="0.1" value="1.8">
+        <input type="range" id="color-scale" min="1" max="4" step="1" value="2">
       </div>
       <div class="toggle-row" id="preset-row">
         <span>Style</span>
@@ -1911,7 +1934,7 @@ const TIME_BANDS = [
 // Default 1.8 (was 1.0) so most of Europe reads green→yellow from Bristol and only
 // intercontinental distances go orange→red (josh 2026-07-06: "more relaxed scaling
 // so most of Europe is green light green maybe yellow ... red when other side of world").
-let colorScale = 1.8;
+let colorScale = 2; // slider locked to integers 1-4 (josh 2026-07-19); was 1.8
 
 // =============================================================================
 // THEME ENGINE
@@ -2376,6 +2399,32 @@ async function initMap() {
       data: { type: 'FeatureCollection', features: [] }
     });
 
+    // Hover highlight — the cell under the cursor shows lightly so you can
+    // see what a click would pin (the washes otherwise swallow the hex edges).
+    // Added before the pinned layers so a pin always draws over the hover.
+    map.addSource('hover-cell', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+    map.addLayer({
+      id: 'hover-cell-fill',
+      type: 'fill',
+      source: 'hover-cell',
+      paint: {
+        'fill-color': '#ffffff',
+        'fill-opacity': 0.22
+      }
+    });
+    map.addLayer({
+      id: 'hover-cell-outline',
+      type: 'line',
+      source: 'hover-cell',
+      paint: {
+        'line-color': 'rgba(58, 44, 26, 0.85)',
+        'line-width': 1.8
+      }
+    });
+
     // pinned route: solid gold flight legs (distinct from white hover route)
     map.addLayer({
       id: 'pinned-route-flights',
@@ -2438,10 +2487,17 @@ async function initMap() {
     // Interaction
     // (these delegated per-layer handlers survive setStyle/theme switches —
     // maplibre resolves the layer id at event time)
+    let hoveredH3 = null; // debounce hover-source writes to cell changes
     map.on('mousemove', 'hexgrid-fill', (e) => {
       if (e.features.length > 0) {
         const props = e.features[0].properties;
         showTooltip(props);
+        // light highlight on the hovered cell (rebuilt from h3, not the
+        // rendered feature — tile clipping can truncate the polygon)
+        if (props.h3Index && props.h3Index !== hoveredH3) {
+          hoveredH3 = props.h3Index;
+          map.getSource('hover-cell').setData(cellBoundaryFeature(props.h3Index, props));
+        }
         // draw route line on hover (works for both flight and drive-only cells)
         try {
           const route = JSON.parse(props.route);
@@ -2456,8 +2512,10 @@ async function initMap() {
     map.on('mouseleave', 'hexgrid-fill', () => {
       hideTooltip();
       map.getCanvas().style.cursor = '';
-      // clear route line
+      // clear route line + hover highlight
       map.getSource('route-line').setData({ type: 'FeatureCollection', features: [] });
+      hoveredH3 = null;
+      map.getSource('hover-cell').setData({ type: 'FeatureCollection', features: [] });
     });
 
     // click a hex to pin it (re-click the same hex to unpin)
@@ -2870,7 +2928,11 @@ function addAppSourcesAndLayers() {
       type: 'line',
       source: 'openmaptiles',
       'source-layer': 'boundary',
-      filter: ['==', ['get', 'admin_level'], 2],
+      // maritime=1 rows are sea borders drawn ~50mi offshore (EEZ-style) —
+      // they read as phantom coastlines around japan/korea. Land borders only.
+      // (!= 1 in both types: tilesets vary between numeric and string flags)
+      filter: ['all', ['==', ['get', 'admin_level'], 2],
+               ['!=', ['get', 'maritime'], 1], ['!=', ['get', 'maritime'], '1']],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': 'rgba(246, 239, 222, 0.85)',
@@ -2886,7 +2948,9 @@ function addAppSourcesAndLayers() {
       type: 'line',
       source: 'openmaptiles',
       'source-layer': 'boundary',
-      filter: ['==', ['get', 'admin_level'], 2],
+      // land borders only — see maritime note on the casing layer above
+      filter: ['all', ['==', ['get', 'admin_level'], 2],
+               ['!=', ['get', 'maritime'], 1], ['!=', ['get', 'maritime'], '1']],
       paint: {
         'line-color': T.borderColor,
         'line-width': [
@@ -3938,26 +4002,29 @@ function clearAllPins() {
   refreshPins();
 }
 
-// snapshot everything needed to render a pin — independent of the live grid,
-// so pins survive pan/zoom/resolution changes
-function buildPinEntry(properties) {
-  const route = parseMaybeJSON(properties.route);
-  const centroid = parseMaybeJSON(properties.centroid);
-
-  // hex boundary polygon (same antimeridian handling as generateHexGridDirect)
-  const boundary = h3.cellToBoundary(properties.h3Index);
+// hex boundary polygon for one cell (same antimeridian handling as
+// generateHexGridDirect) — shared by the pin snapshot and the hover highlight
+function cellBoundaryFeature(h3Index, properties = {}) {
+  const boundary = h3.cellToBoundary(h3Index);
   let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
   const lngs = coordinates.map(c => c[0]);
   if (lngs.some(lng => lng > 90) && lngs.some(lng => lng < -90)) {
     coordinates = coordinates.map(([lng, lat]) => [lng < 0 ? lng + 360 : lng, lat]);
   }
   coordinates.push(coordinates[0]);
-
-  const boundaryFeature = {
+  return {
     type: 'Feature',
-    properties: { h3Index: properties.h3Index, color: properties.color },
+    properties: { h3Index, color: properties.color },
     geometry: { type: 'Polygon', coordinates: [coordinates] },
   };
+}
+
+// snapshot everything needed to render a pin — independent of the live grid,
+// so pins survive pan/zoom/resolution changes
+function buildPinEntry(properties) {
+  const route = parseMaybeJSON(properties.route);
+  const centroid = parseMaybeJSON(properties.centroid);
+  const boundaryFeature = cellBoundaryFeature(properties.h3Index, properties);
 
   // route polyline features (reuses the hover route-line builder)
   let routeFeatures = [];
@@ -4031,6 +4098,32 @@ document.addEventListener('keydown', (e) => {
 // returns FeatureCollection with:
 //   drive-only: dashed origin → cell
 //   flights: dashed origin → first airport, solid flight legs, dashed last airport → cell
+// great-circle interpolation between two [lng, lat] points (spherical slerp).
+// Flight legs were straight lng/lat LineStrings, which render as physically
+// nonsensical curves on the globe projection — real flights follow the
+// shortest path over the sphere (josh 2026-07-19).
+function greatCircleArc(a, b, segments = 64) {
+  const toRad = Math.PI / 180, toDeg = 180 / Math.PI;
+  const lng1 = a[0] * toRad, lat1 = a[1] * toRad;
+  const lng2 = b[0] * toRad, lat2 = b[1] * toRad;
+  const v1 = [Math.cos(lat1) * Math.cos(lng1), Math.cos(lat1) * Math.sin(lng1), Math.sin(lat1)];
+  const v2 = [Math.cos(lat2) * Math.cos(lng2), Math.cos(lat2) * Math.sin(lng2), Math.sin(lat2)];
+  const dot = Math.min(1, Math.max(-1, v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]));
+  const omega = Math.acos(dot);
+  if (omega < 1e-6) return [[...a], [...b]];
+  const coords = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const s1 = Math.sin((1 - t) * omega) / Math.sin(omega);
+    const s2 = Math.sin(t * omega) / Math.sin(omega);
+    const x = s1 * v1[0] + s2 * v2[0];
+    const y = s1 * v1[1] + s2 * v2[1];
+    const z = s1 * v1[2] + s2 * v2[2];
+    coords.push([Math.atan2(y, x) * toDeg, Math.atan2(z, Math.hypot(x, y)) * toDeg]);
+  }
+  return coords;
+}
+
 function buildRouteGeoJSON(route, centroid) {
   const features = [];
   const origin = ORIGINS[currentOrigin];
@@ -4078,11 +4171,25 @@ function buildRouteGeoJSON(route, centroid) {
     geometry: { type: 'LineString', coordinates: [adjOrigin, adjFlights[0]] }
   });
 
-  // flight legs: airport → airport (solid)
+  // flight legs: airport → airport (solid), each densified along its great
+  // circle. Arcs are generated from RAW coords (slerp output normalizes to
+  // ±180), then unwrapped point-by-point from the shifted anchor so the
+  // polyline stays continuous across the antimeridian.
+  const flightPath = [adjFlights[0]];
+  for (let i = 0; i < flightCoords.length - 1; i++) {
+    const arc = greatCircleArc(flightCoords[i], flightCoords[i + 1]);
+    for (let j = 1; j < arc.length; j++) {
+      let lng = arc[j][0];
+      const prev = flightPath[flightPath.length - 1][0];
+      while (lng - prev > 180) lng -= 360;
+      while (prev - lng > 180) lng += 360;
+      flightPath.push([lng, arc[j][1]]);
+    }
+  }
   features.push({
     type: 'Feature',
     properties: { segment: 'flight' },
-    geometry: { type: 'LineString', coordinates: adjFlights }
+    geometry: { type: 'LineString', coordinates: flightPath }
   });
 
   // ground-from: last airport → cell centroid (dashed)
@@ -4131,8 +4238,7 @@ document.getElementById('toggle-osrm').addEventListener('change', (e) => {
 let _colorScaleTimer = null;
 document.getElementById('color-scale').addEventListener('input', (e) => {
   colorScale = parseFloat(e.target.value);
-  document.getElementById('color-scale-label').textContent =
-    colorScale.toFixed(1) + '×';
+  document.getElementById('color-scale-label').textContent = colorScale + '×';
   if (_colorScaleTimer) clearTimeout(_colorScaleTimer);
   _colorScaleTimer = setTimeout(() => {
     _colorScaleTimer = null;
