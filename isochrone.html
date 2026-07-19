@@ -1920,6 +1920,15 @@ function applyLineStylePaint() {
     setP('country-borders-casing', 'line-color', LS.border.casingColor);
     setP('country-borders-casing', 'line-width', LS.border.casingWidth);
   }
+  // coastline mirrors the country-border treatment exactly (josh 2026-07-19)
+  setP('coastline', 'line-color', LS.border.color);
+  setP('coastline', 'line-width', LS.border.width);
+  setP('coastline', 'line-dasharray', LS.border.dash || [1, 0]);
+  setP('coastline-casing', 'line-opacity', LS.border.casing ? 1 : 0);
+  if (LS.border.casing) {
+    setP('coastline-casing', 'line-color', LS.border.casingColor);
+    setP('coastline-casing', 'line-width', LS.border.casingWidth);
+  }
 }
 
 // =============================================================================
@@ -2947,17 +2956,38 @@ function addAppSourcesAndLayers() {
     // coastline: stroke the water polygons' edges — the boundary source-layer
     // only carries admin borders, so without this the land/sea edge has no
     // linework at all (josh 2026-07-19: "can't see between Spain and the
-    // ocean"). Lighter than the admin borders so political lines stay the
-    // primary linework; lakes get the same shoreline stroke (period-correct
-    // for engraved plates).
+    // ocean"). Rendered as a full twin of the country borders (same casing +
+    // core treatment, same paint from applyLineStylePaint) per josh: coastline
+    // should look like the country-country borders. Lakes get the same
+    // shoreline stroke (period-correct for engraved plates).
+    addLayerOnce({
+      id: 'coastline-casing',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'water',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': 'rgba(246, 239, 222, 0.85)',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          1, 2.0, 4, 3.6, 8, 5.5
+        ],
+        'line-opacity': 0,
+      }
+    });
     addLayerOnce({
       id: 'coastline',
       type: 'line',
       source: 'openmaptiles',
       'source-layer': 'water',
       paint: {
-        'line-color': 'rgba(82, 66, 43, 0.55)',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.3, 4, 0.8, 8, 1.3],
+        'line-color': T.borderColor,
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          1, 0.5,
+          4, 1.5,
+          8, 2.5
+        ],
       }
     });
 
