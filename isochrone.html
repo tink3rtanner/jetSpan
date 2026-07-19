@@ -854,9 +854,9 @@
       <div class="slider-row">
         <div class="slider-header">
           <span>Color scale</span>
-          <span class="slider-value" id="color-scale-label">2×</span>
+          <span class="slider-value" id="color-scale-label">3×</span>
         </div>
-        <input type="range" id="color-scale" min="1" max="4" step="1" value="2">
+        <input type="range" id="color-scale" min="1" max="4" step="1" value="3">
       </div>
       <div class="toggle-row" id="preset-row">
         <span>Style</span>
@@ -1730,7 +1730,7 @@ const THEMES = {
       labelColor: '#2e2417', labelHalo: '#f0e6cf',
       originColor: '#8b3a2f', originStroke: '#f5eedd',
       borderColor: 'rgba(92, 70, 48, 0.55)',
-      routeColor: '#3a2f22',
+      routeColor: '#ffffff', // hover route = white/grey; the PLACED route is black (josh 2026-07-19)
       ink: '#3a2c1a',           // engraving ink for isolines + graticule
     },
   },
@@ -1812,24 +1812,25 @@ const THEMES = {
 let currentTheme = 'vintage';
 try { localStorage.setItem('jetspan-theme', 'vintage'); } catch (e) {}
 
-// active vintage palette — persisted in localStorage, heatmap by default
+// active vintage palette — persisted in localStorage, hypso by default so a
+// fresh load lands on the "Hypsometric" style preset (josh 2026-07-19)
 let currentPalette = (() => {
   try {
     const saved = localStorage.getItem('jetspan-palette');
     if (saved && VINTAGE_PALETTES[saved]) return saved;
   } catch (e) {}
-  return 'heatmap';
+  return 'hypso';
 })();
 THEMES.vintage.bandColors = VINTAGE_PALETTES[currentPalette].colors;
 
-// active line style (engraved theme) — persisted, boldwash by default so a
-// fresh load lands on the "Bold wash" style preset (heatmap+boldwash)
+// active line style (engraved theme) — persisted, layered by default so a
+// fresh load lands on the "Hypsometric" style preset (hypso+layered)
 let currentLineStyle = (() => {
   try {
     const saved = localStorage.getItem('jetspan-linestyle');
     if (saved && LINE_STYLES[saved]) return saved;
   } catch (e) {}
-  return 'boldwash';
+  return 'layered';
 })();
 
 // switch the engraved theme's colour ramp in place (no basemap reload):
@@ -1934,7 +1935,7 @@ const TIME_BANDS = [
 // Default 1.8 (was 1.0) so most of Europe reads green→yellow from Bristol and only
 // intercontinental distances go orange→red (josh 2026-07-06: "more relaxed scaling
 // so most of Europe is green light green maybe yellow ... red when other side of world").
-let colorScale = 2; // slider locked to integers 1-4 (josh 2026-07-19); was 1.8
+let colorScale = 3; // slider locked to integers 1-4, default 3x (josh 2026-07-19)
 
 // =============================================================================
 // THEME ENGINE
@@ -2448,52 +2449,45 @@ async function initMap() {
       }
     });
 
-    // pinned route: solid gold flight legs (distinct from white hover route)
+    // pinned route: solid BLACK ink flight legs — the placed route is black,
+    // the hover route is white/grey (josh 2026-07-19; was gold)
     map.addLayer({
       id: 'pinned-route-flights',
       type: 'line',
       source: 'pinned-routes',
       filter: ['==', ['get', 'segment'], 'flight'],
       paint: {
-        'line-color': '#fbbf24',
+        'line-color': '#221a10',
         'line-width': 2.5,
         'line-opacity': 0.9
       }
     });
 
-    // pinned route: dashed gold ground segments
+    // pinned route: dashed black ink ground segments
     map.addLayer({
       id: 'pinned-route-ground',
       type: 'line',
       source: 'pinned-routes',
       filter: ['==', ['get', 'segment'], 'ground'],
       paint: {
-        'line-color': '#fbbf24',
+        'line-color': '#221a10',
         'line-width': 2,
         'line-opacity': 0.65,
         'line-dasharray': [4, 3]
       }
     });
 
-    // pinned hex: brightened fill + dark casing + bold gold outline
-    // (casing gives contrast against both light basemap and colored cells)
+    // pinned hex: IDENTICAL style to the hover hex (light white fill + ink
+    // outline) — josh 2026-07-19: placed and on-deck hexes share one visual
+    // language; the routes (black vs white) tell them apart. The old gold
+    // outline + dark casing treatment is retired.
     map.addLayer({
       id: 'pinned-cells-fill',
       type: 'fill',
       source: 'pinned-cells',
       paint: {
-        'fill-color': ['get', 'color'],
-        'fill-opacity': 0.75
-      }
-    });
-    map.addLayer({
-      id: 'pinned-cells-casing',
-      type: 'line',
-      source: 'pinned-cells',
-      paint: {
-        'line-color': '#1a1a1a',
-        'line-width': 6,
-        'line-opacity': 0.75
+        'fill-color': '#ffffff',
+        'fill-opacity': 0.22
       }
     });
     map.addLayer({
@@ -2501,9 +2495,8 @@ async function initMap() {
       type: 'line',
       source: 'pinned-cells',
       paint: {
-        'line-color': '#fbbf24',
-        'line-width': 3,
-        'line-opacity': 1
+        'line-color': 'rgba(58, 44, 26, 0.85)',
+        'line-width': 1.8
       }
     });
 
@@ -2944,6 +2937,23 @@ function addAppSourcesAndLayers() {
   // Add country borders on top of hex grid
   // Use the existing OpenMapTiles vector source from the base style
   if (map.getSource('openmaptiles')) {
+    // coastline: stroke the water polygons' edges — the boundary source-layer
+    // only carries admin borders, so without this the land/sea edge has no
+    // linework at all (josh 2026-07-19: "can't see between Spain and the
+    // ocean"). Lighter than the admin borders so political lines stay the
+    // primary linework; lakes get the same shoreline stroke (period-correct
+    // for engraved plates).
+    addLayerOnce({
+      id: 'coastline',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'water',
+      paint: {
+        'line-color': 'rgba(82, 66, 43, 0.55)',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.3, 4, 0.8, 8, 1.3],
+      }
+    });
+
     // light casing halo UNDER the border line — the engraved 'layered' line
     // style fades it in; every other style keeps it at opacity 0
     addLayerOnce({
@@ -3997,7 +4007,7 @@ function hideTooltip() {
 // =============================================================================
 
 const pinnedCells = new Map(); // h3Index -> { properties, boundaryFeature, routeFeatures }
-const MAX_PINS = 3;
+const MAX_PINS = 1; // one placed route at a time (josh 2026-07-19); click replaces
 
 function togglePin(properties) {
   const h3Index = properties.h3Index;
