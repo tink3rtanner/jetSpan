@@ -752,6 +752,16 @@
           <option value="dark">Dark</option>
         </select>
       </div>
+      <div class="toggle-row" id="preset-row">
+        <span>Preset</span>
+        <select class="theme-select" id="preset-select">
+          <option value="custom">Custom</option>
+          <option value="bold-heat">Bold wash</option>
+          <option value="ink-heat">Ink isolines</option>
+          <option value="verdigris">Verdigris</option>
+          <option value="hypso">Hypsometric</option>
+        </select>
+      </div>
       <div class="toggle-row" id="palette-row">
         <span>Colours</span>
         <select class="theme-select" id="palette-select">
@@ -759,12 +769,16 @@
           <option value="monowarm">Sepia</option>
           <option value="viridis">Viridis</option>
           <option value="galton">Galton 1881</option>
+          <option value="verdigris">Verdigris</option>
+          <option value="hypso">Hypsometric</option>
         </select>
       </div>
       <div class="toggle-row" id="linestyle-row">
         <span>Line style</span>
         <select class="theme-select" id="linestyle-select">
           <option value="washes">Washes</option>
+          <option value="boldwash">Bold wash</option>
+          <option value="inklines">Ink isolines</option>
           <option value="contours">Contours</option>
           <option value="layered">Layered</option>
         </select>
@@ -1423,6 +1437,43 @@ const VINTAGE_PALETTES = {
       '#2b0a52', // 24h+    deep violet (slowest)
     ],
   },
+  // teal-near ramp ("verdigris"): near = oxidised-copper teal, mid = straw,
+  // far = rose→umber. Ordered cool→warm; the teal survives the sepia filter
+  // where plain greens grey out (design-lab core-render round 2, 2026-07-19).
+  verdigris: {
+    label: 'Verdigris',
+    colors: [
+      '#2a8f7a', // < 2h    verdigris teal (fast)
+      '#57ab8d', // 2-4h    sea green
+      '#93c39b', // 4-6h    pale jade
+      '#cfd8a6', // 6-8h    straw green
+      '#ead9a0', // 8-10h   straw
+      '#e0b183', // 10-12h  buff
+      '#cd8266', // 12-14h  terracotta
+      '#b05a4c', // 14-18h  rose madder
+      '#874034', // 18-24h  burnt sienna
+      '#5a2a20', // 24h+    dark umber (slowest)
+    ],
+  },
+  // Bartholomew atlas layer-tinting (hypsometric lineage): green lowlands →
+  // buff → sienna → dark brown "highlands" = far. Saturation boosted ~40% vs
+  // the classic plates — anything subtler dies under the sepia canvas filter
+  // (design-lab core-render round 1 washed out, round 2 boost fixed it).
+  hypso: {
+    label: 'Hypsometric',
+    colors: [
+      '#2e8f4e', // < 2h    lowland green (fast)
+      '#66ab55', // 2-4h    green
+      '#a8c46a', // 4-6h    yellow-green
+      '#dfd58a', // 6-8h    pale buff
+      '#e4bd62', // 8-10h   buff
+      '#d4923f', // 10-12h  ochre
+      '#bd6a2e', // 12-14h  sienna
+      '#9c4a20', // 14-18h  burnt sienna
+      '#753214', // 18-24h  brown
+      '#4a1e0a', // 24h+    dark brown (slowest)
+    ],
+  },
   // LEGACY: Galton's actual 1881 wash colours (green/yellow/pink/blue/brown,
   // two shades each). Historically faithful but NOT perceptually ordered.
   galton: {
@@ -1467,6 +1518,42 @@ const LINE_STYLES = {
       color: 'rgba(72, 56, 36, 0.72)',
       width: ['interpolate', ['linear'], ['zoom'], 1, 0.4, 4, 0.9, 8, 1.4],
       dash: null,                // solid hairline
+      casing: false,
+    },
+  },
+  // washes at full chromolith strength: same treatment, fill pushed 0.45→0.62
+  // so the band steps read as a bold printed plate rather than a faint stain
+  // (design-lab core-render pick #1, 2026-07-19).
+  boldwash: {
+    label: 'Bold wash',
+    graticuleOpacity: 0.15,
+    washFillOpacity: 0.62,
+    washEdgeOpacity: 0,
+    contourOpacity: 0,
+    contourColorMode: 'ink',
+    contourWidth: ['case', ['get', 'major'], 1.0, 0.6],
+    border: {
+      color: 'rgba(72, 56, 36, 0.72)',
+      width: ['interpolate', ['linear'], ['zoom'], 1, 0.4, 4, 0.9, 8, 1.4],
+      dash: null,
+      casing: false,
+    },
+  },
+  // washes + engraved ink isolines etched over the colour: keeps the wash
+  // gradient but adds the band-edge linework of an 1880s plate
+  // (design-lab core-render pick #2, 2026-07-19).
+  inklines: {
+    label: 'Ink isolines',
+    graticuleOpacity: 0.15,
+    washFillOpacity: 0.45,
+    washEdgeOpacity: 0,
+    contourOpacity: 0.5,
+    contourColorMode: 'ink',
+    contourWidth: ['case', ['get', 'major'], 1.4, 0.8],
+    border: {
+      color: 'rgba(72, 56, 36, 0.72)',
+      width: ['interpolate', ['linear'], ['zoom'], 1, 0.4, 4, 0.9, 8, 1.4],
+      dash: null,
       casing: false,
     },
   },
@@ -1653,6 +1740,7 @@ function setVintagePalette(name) {
       applyLineStylePaint(); // wash-edge/contour colour exprs were baked at add time
     }
   }
+  syncPresetSelect();
 }
 
 // switch band-edge vs border treatment in place (engraved theme only)
@@ -1663,6 +1751,28 @@ function setLineStyle(name) {
   const sel = document.getElementById('linestyle-select');
   if (sel && sel.value !== name) sel.value = name;
   if (currentTheme === 'vintage' && map) applyLineStylePaint();
+  syncPresetSelect();
+}
+
+// curated (palette, line-style) pairs from the 2026-07-19 design-lab
+// core-render review — the four josh picked out of 29 candidates. The
+// Colours/Line-style pickers stay live underneath; any manual tweak that
+// leaves a preset's exact pair flips the preset picker back to Custom.
+const STYLE_PRESETS = {
+  'bold-heat': { palette: 'heatmap',   linestyle: 'boldwash' },
+  'ink-heat':  { palette: 'heatmap',   linestyle: 'inklines' },
+  'verdigris': { palette: 'verdigris', linestyle: 'boldwash' },
+  'hypso':     { palette: 'hypso',     linestyle: 'layered' },
+};
+
+// reflect the current palette+linestyle pair in the preset picker
+function syncPresetSelect() {
+  const sel = document.getElementById('preset-select');
+  if (!sel) return;
+  const match = Object.keys(STYLE_PRESETS).find((k) =>
+    STYLE_PRESETS[k].palette === currentPalette &&
+    STYLE_PRESETS[k].linestyle === currentLineStyle);
+  sel.value = match || 'custom';
 }
 
 // apply the active LINE_STYLES variant's paint onto the live engraved layers.
@@ -1770,7 +1880,9 @@ function applyThemeChrome(name) {
   const sel = document.getElementById('theme-select');
   if (sel && sel.value !== name) sel.value = name;
 
-  // palette + line-style pickers: only meaningful for the engraved theme
+  // preset + palette + line-style pickers: only meaningful for the engraved theme
+  const presetRow = document.getElementById('preset-row');
+  if (presetRow) presetRow.style.display = engraved ? '' : 'none';
   const palRow = document.getElementById('palette-row');
   if (palRow) palRow.style.display = engraved ? '' : 'none';
   const palSel = document.getElementById('palette-select');
@@ -1779,6 +1891,7 @@ function applyThemeChrome(name) {
   if (lsRow) lsRow.style.display = engraved ? '' : 'none';
   const lsSel = document.getElementById('linestyle-select');
   if (lsSel && lsSel.value !== currentLineStyle) lsSel.value = currentLineStyle;
+  syncPresetSelect();
 }
 
 // full theme switch at runtime: chrome + basemap swap + re-add app layers
@@ -3686,6 +3799,15 @@ document.getElementById('color-scale').addEventListener('change', () => {
 // theme selector: full switch (chrome + basemap + layers)
 document.getElementById('theme-select').addEventListener('change', (e) => {
   applyTheme(e.target.value);
+});
+
+// preset selector (vintage only): applies a curated palette+linestyle pair.
+// 'custom' is a state the sync helper sets, not an action — ignore it.
+document.getElementById('preset-select').addEventListener('change', (e) => {
+  const p = STYLE_PRESETS[e.target.value];
+  if (!p) return;
+  setVintagePalette(p.palette);
+  setLineStyle(p.linestyle);
 });
 
 // palette selector (vintage only): in-place recolor, no basemap reload
