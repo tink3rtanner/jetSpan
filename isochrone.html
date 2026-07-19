@@ -2256,6 +2256,29 @@ function buildContourGeoJSON() {
         .filter(poly => poly[0] && poly[0].length >= 50)
         .map(poly => poly.filter((ring, ri) => ri === 0 || ring.length >= 50));
       if (!mp.length) continue;
+      // Antimeridian fix (2026-07-19): cellsToMultiPolygon emits raw ±180
+      // lngs, so any ring spanning the antimeridian — fiji sits at 178°E, and
+      // every far band's edge rings surround bristol's ANTIPODE south of NZ —
+      // jumps ±360° mid-ring, and MapLibre strokes each jump as a full-width
+      // streak across the pacific. Unwrap each ring point-by-point for lng
+      // continuity (out-of-range lngs render fine on the globe). Emitted as
+      // MultiLineString: both consumers (wash-edges, contour-lines) are LINE
+      // layers, and a globe-encircling ring unwraps to end at start+360°,
+      // which a polyline renders in place but would make an invalid polygon.
+      const paths = [];
+      for (const poly of mp) {
+        for (const ring of poly) {
+          const path = [ring[0]];
+          for (let j = 1; j < ring.length; j++) {
+            let lng = ring[j][0];
+            const prev = path[path.length - 1][0];
+            while (lng - prev > 180) lng -= 360;
+            while (prev - lng > 180) lng += 360;
+            path.push([lng, ring[j][1]]);
+          }
+          paths.push(path);
+        }
+      }
       features.push({
         type: 'Feature',
         properties: {
@@ -2263,7 +2286,7 @@ function buildContourGeoJSON() {
           maxHours: TIME_BANDS[i].maxHours * colorScale,
           major: i % 2 === 1, // every other isoline drawn heavier
         },
-        geometry: { type: 'MultiPolygon', coordinates: mp },
+        geometry: { type: 'MultiLineString', coordinates: paths },
       });
     } catch (e) { /* dissolve can fail on mixed-res sets; skip band */ }
   }
