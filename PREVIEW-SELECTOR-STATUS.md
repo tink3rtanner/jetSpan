@@ -105,6 +105,14 @@ Re-confirmed `git log main..origin/<b>` empty at delete time before removing:
 - Main already delivers both of its goals, better: **6 selectable ordered palettes** (Heat/Sepia/Viridis/Verdigris/Hypsometric/Galton) cover "better color ramp"; the **`colorScale` slider** (1–4×, band-threshold redistribution) covers the gamma "color focus: near/far" value-prop.
 - Its only unique remainder — *continuous* non-banded interpolation — directly contradicts main's deliberate **discrete-band engraved-plate** aesthetic (the whole vintage direction). Refreshing = a re-design, not a rebase. Recoverable from the archive tag if the gamma-focus idea is ever wanted as a fresh feature on the vintage palettes.
 
+### 4. Switch-back dead-end bug (from josh live-testing) — FIXED + verified live
+**Bug:** navigating INTO a preview built from a branch whose own `isochrone.html` predates the in-app `#branch-select` (all old feat branches, codex, nifty) left a **dead-end** — that page had no switcher, so no way to change branch or return to main.
+**Fix:** a deploy-time **branch-switcher overlay** injected into EVERY preview page (`inject_selector()` in `build-preview-site.py`, same pattern as the fetch-shim). Self-contained, namespaced (`#jetspan-preview-switcher` pill, top-center), reads the shared `/preview/previews.json`, climbs to site root the same way the shim does. Idempotent; applies to shared- AND full-data previews.
+- **Verified LIVE** (headless load of the deployed `/preview/claude-nifty-montalcini-150823/isochrone.html`, a full-data branch with no built-in selector): overlay present, options populated from the live manifest (`main (live)`, nifty, codex, feat/mobile), current = nifty, "main (live)" → `/jetSpan/isochrone.html` (correct Pages root), 0 page errors. Also confirmed present via curl in `/preview/feat-mobile/isochrone.html`.
+
+### 5. Rebuild-to-appear (josh: a pushed branch doesn't show until a deploy runs)
+Confirmed + inherent to the whole-site-rebuild model — a branch only appears after a workflow run rebuilds the site. Every main push (incl. these commits) triggers a full rebuild; `workflow_dispatch` also works. After the has-PR filter + token fix landed, the rebuild ran and **nifty (PR #2) is live in previews.json** (verified). **Note:** `codex/fill-land-dead-zones` (the actual hole-fix) is NOT yet pushed to origin and neither codex branch that IS pushed has a PR beyond `codex/performance-bench` (PR #3) — under has-PR they'll appear once pushed + PR'd (that's on josh / the codex agent). The filter WOULD include them then — it keys on any open PR of any prefix (already proven: codex/performance-bench PR #3 shows).
+
 ### Final state
 - **origin branches:** main, `feat/branch-preview-selector` (held), `feat/mobile` (PR #4), `claude/nifty-montalcini-150823` (PR #2), `codex/performance-bench` (PR #3).
 - **Deleted:** feat/vintage-theme, feat/click-to-pin-hex, feat/color-gradient (→ tag `archive/feat-color-gradient`).
