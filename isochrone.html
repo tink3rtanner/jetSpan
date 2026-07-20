@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Flight Isochrone Map</title>
 
   <!-- MapLibre GL JS v5+ for globe support -->
@@ -769,6 +769,199 @@
     body.theme-vintage .maplibregl-ctrl-group button + button {
       border-top: 1px solid rgba(107, 86, 56, 0.35);
     }
+    /* =========================================================================
+       MOBILE / TOUCH LAYOUT
+       - shared compact styles for any small screen (phone portrait OR landscape)
+       - portrait: tooltip becomes a bottom sheet, panels go full-width
+       - landscape (short viewport): side panels, made scrollable
+       desktop (>640px wide AND >500px tall) is untouched.
+       ====================================================================== */
+
+    /* kill double-tap-zoom delay on UI controls (map canvas handles its own gestures) */
+    button, .toggle-slider, .slider-row input[type="range"], .legend {
+      touch-action: manipulation;
+    }
+
+    .legend-bar { display: none; }     /* mobile-only element */
+    .tooltip-close { display: none; }  /* mobile-only control (desktop hides on mouseleave) */
+
+    /* any touch-primary device (incl. tablets at desktop widths) needs the close
+       button — there is no mouseleave to dismiss the tooltip */
+    @media (hover: none) {
+      .tooltip-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin-left: 10px;
+        flex-shrink: 0;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 50%;
+        color: #ccc;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+      }
+    }
+
+    @media (max-width: 640px), (max-height: 500px) {
+      /* compact title */
+      .title-panel {
+        top: 10px;
+        left: 10px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        max-width: calc(100vw - 78px); /* leave room for the info button */
+      }
+      .title-panel h1 { font-size: 14px; }
+      .title-panel .subtitle { font-size: 10px; }
+
+      /* 44px minimum touch target for the info button */
+      .info-btn { top: 10px; right: 10px; width: 44px; height: 44px; font-size: 20px; }
+
+      /* bigger touch targets inside the settings panel */
+      .toggle-row { padding: 12px 0; }
+      .toggle-switch { width: 48px; height: 26px; }
+      .toggle-slider { border-radius: 26px; }
+      .toggle-slider:before { height: 20px; width: 20px; }
+      .toggle-switch input:checked + .toggle-slider:before { transform: translateX(22px); }
+      .slider-row { padding: 12px 0; }
+      .slider-row input[type="range"] { height: 6px; }
+      .slider-row input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; }
+
+      /* legend: swap the 10-row list for a slim gradient bar; tap to expand the list */
+      .legend { cursor: pointer; }
+      .legend h3 { margin-bottom: 8px; font-size: 10px; }
+      .legend .legend-item { display: none; }
+      .legend.expanded .legend-item { display: flex; }
+      .legend-bar { display: block; }
+      .legend-gradient {
+        height: 10px;
+        border-radius: 5px;
+        /* discrete stops matching the TIME_BANDS swatches above */
+        background: linear-gradient(to right,
+          #22c55e 0 10%, #84cc16 10% 20%, #eab308 20% 30%, #f97316 30% 40%,
+          #ef4444 40% 50%, #dc2626 50% 60%, #a855f7 60% 70%, #7c3aed 70% 80%,
+          #4c1d95 80% 90%, #1e1b4b 90% 100%);
+      }
+      .legend-ticks {
+        position: relative;
+        height: 14px;
+        margin-top: 4px;
+        font-size: 10px;
+        color: #888;
+      }
+      .legend-tick { position: absolute; transform: translateX(-50%); }
+      .legend.expanded .legend-bar { margin-top: 8px; }
+
+      /* tooltip close button (touch devices never get mouseleave) */
+      .tooltip-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        margin-left: 10px;
+        flex-shrink: 0;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 50%;
+        color: #ccc;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      /* maplibre controls: hide +/− (pinch-zoom is native), enlarge what remains */
+      .maplibregl-ctrl-bottom-right .maplibregl-ctrl-zoom-in,
+      .maplibregl-ctrl-bottom-right .maplibregl-ctrl-zoom-out { display: none; }
+      .maplibregl-ctrl-group button { width: 40px; height: 40px; }
+    }
+
+    /* ---- phone PORTRAIT ---- */
+    @media (max-width: 640px) and (min-height: 501px) {
+      /* settings panel becomes a full-width drawer under the top bar */
+      .info-panel {
+        top: 62px;
+        left: 10px;
+        right: 10px;
+        min-width: 0;
+        max-height: calc(100vh - 160px);
+        max-height: calc(100dvh - 160px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* legend: full-width slim strip pinned to the bottom */
+      .legend {
+        left: 10px;
+        right: 10px;
+        bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        padding: 10px 14px;
+      }
+
+      /* tooltip: bottom sheet, scrollable, above everything */
+      .tooltip {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        min-width: 0;
+        max-width: none;
+        border-radius: 16px 16px 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+        max-height: 45vh;
+        max-height: 45dvh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        z-index: 200;
+      }
+
+      /* float map controls + attribution above the legend strip */
+      .maplibregl-ctrl-bottom-right,
+      .maplibregl-ctrl-bottom-left { bottom: 82px; }
+    }
+
+    /* ---- phone LANDSCAPE (short viewport) ---- */
+    @media (max-height: 500px) {
+      .info-panel {
+        top: 62px;
+        right: 10px;
+        left: auto;
+        width: 320px;
+        min-width: 0;
+        max-height: calc(100vh - 76px);
+        max-height: calc(100dvh - 76px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      .legend {
+        left: 10px;
+        right: auto;
+        bottom: 10px;
+        width: 280px;
+        padding: 10px 14px;
+      }
+      .tooltip {
+        bottom: 10px;
+        right: 10px;
+        min-width: 0;
+        width: 320px;
+        max-width: none;
+        max-height: calc(100vh - 20px);
+        max-height: calc(100dvh - 20px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        z-index: 200;
+      }
+    }
   </style>
 </head>
 <body class="theme-vintage">
@@ -917,8 +1110,8 @@
     </div>
   </div>
 
-  <!-- Legend -->
-  <div class="legend">
+  <!-- Legend (mobile shows the gradient bar; tap toggles the full list) -->
+  <div class="legend" onclick="this.classList.toggle('expanded')">
     <h3>Travel Time</h3>
     <div class="legend-item"><div class="legend-color" style="background: #22c55e;"></div> < 2 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #84cc16;"></div> 2-4 hours</div>
@@ -930,6 +1123,17 @@
     <div class="legend-item"><div class="legend-color" style="background: #7c3aed;"></div> 14-18 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #4c1d95;"></div> 18-24 hours</div>
     <div class="legend-item"><div class="legend-color" style="background: #1e1b4b;"></div> 24+ hours</div>
+    <!-- compact gradient bar — mobile only (see MOBILE/TOUCH CSS). tick labels
+         rescale with the color-scale slider via updateLegend() -->
+    <div class="legend-bar">
+      <div class="legend-gradient"></div>
+      <div class="legend-ticks">
+        <span class="legend-tick" data-hours="2" style="left: 10%">2h</span>
+        <span class="legend-tick" data-hours="6" style="left: 30%">6h</span>
+        <span class="legend-tick" data-hours="12" style="left: 60%">12h</span>
+        <span class="legend-tick" data-hours="24" style="left: 90%">24h</span>
+      </div>
+    </div>
   </div>
 
   <!-- Pinned destination cards (click a hex to pin it) -->
@@ -940,6 +1144,7 @@
     <div class="tooltip-header">
       <div class="tooltip-location" id="tooltip-location">Paris, France</div>
       <div class="tooltip-time" id="tooltip-time">3h 45m</div>
+      <button class="tooltip-close" onclick="closeTooltip()" aria-label="Close">×</button>
     </div>
     <div class="tooltip-breakdown" id="tooltip-breakdown">
       <!-- populated dynamically by showTooltip() -->
@@ -2173,6 +2378,11 @@ function updateLegend() {
     const textNode = items[i].childNodes[1];
     if (textNode) textNode.textContent = ' ' + label;
   });
+  // mobile gradient-bar tick labels rescale with the slider too
+  document.querySelectorAll('.legend-tick').forEach(tick => {
+    const h = parseFloat(tick.dataset.hours);
+    if (h) tick.textContent = formatBandHours(h * colorScale);
+  });
 }
 
 function formatBandHours(h) {
@@ -2584,6 +2794,32 @@ async function initMap() {
     map.on('mouseenter', 'hexgrid-fill', () => {
       map.getCanvas().style.cursor = 'pointer';
     });
+
+    // touch support: tap a hex to show the tooltip + route line (mousemove/mouseleave
+    // never fire on touch devices). tapping empty map/water dismisses. doubles as
+    // click-to-inspect on desktop — harmless alongside hover.
+    map.on('click', (e) => {
+      const feats = map.queryRenderedFeatures(e.point, { layers: ['hexgrid-fill'] });
+      if (feats.length > 0) {
+        const props = feats[0].properties;
+        showTooltip(props);
+        try {
+          const route = JSON.parse(props.route);
+          const centroid = JSON.parse(props.centroid);
+          if (route) {
+            map.getSource('route-line').setData(buildRouteGeoJSON(route, centroid));
+          }
+        } catch (err) {}
+      } else {
+        closeTooltip();
+      }
+    });
+
+    // mobile: maplibre's compact attribution starts expanded, eating a full-width
+    // strip at the bottom — collapse it to its ⓘ toggle (license still accessible)
+    if (window.innerWidth <= 640 || window.innerHeight <= 500) {
+      document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+    }
 
     // Dynamic resolution and viewport-based rendering
     let moveDebounceTimer = null;
@@ -4187,6 +4423,15 @@ window.clearAllPins = clearAllPins;
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') clearAllPins();
 });
+
+// dismiss the tooltip AND clear the route line — used by the mobile close button
+// and by taps on empty map (touch devices never get a mouseleave)
+function closeTooltip() {
+  hideTooltip();
+  try {
+    map.getSource('route-line').setData({ type: 'FeatureCollection', features: [] });
+  } catch (e) {}
+}
 
 // build geojson for route line visualization on hover
 // returns FeatureCollection with:
