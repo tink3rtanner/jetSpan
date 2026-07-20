@@ -40,6 +40,7 @@ import tarfile
 
 FULL_DATA_MARKER = ".preview-full-data"   # opt-in per-branch: give this branch its own data/
 DATA_DIR = "data"                          # the 77MB payload — shared, never duplicated
+PR_REPO = "tink3rtanner/jetSpan"           # repo queried for open PRs (has-PR preview rule)
 
 # fetch-shim injected into every preview HTML: repoints relative data/ fetches
 # to the shared root copy two levels up (out of /preview/<slug>/).
@@ -74,9 +75,38 @@ def slugify(branch):
     return re.sub(r"[^A-Za-z0-9._-]", "-", branch)
 
 
-def list_branches(base_branch):
-    """All deployable branches minus the base. Prefers remote-tracking refs (CI),
-    falls back to / merges local branches so it works both in CI and on a laptop."""
+def open_pr_branches(repo):
+    """Set of head-ref names for OPEN PRs on `repo`, via gh (available in CI with
+    GITHUB_TOKEN). Degrades gracefully: any failure (no gh, no auth, no network,
+    bad JSON) returns an empty set, so the caller falls back to the feat/*-ahead
+    rule alone rather than crashing. Returns (branches, ok) so callers can log the
+    degraded case."""
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "list", "--repo", repo, "--state", "open",
+             "--json", "headRefName", "--limit", "300"],
+            check=True, capture_output=True, text=True).stdout
+        return {d["headRefName"] for d in json.loads(out)}, True
+    except (subprocess.CalledProcessError, FileNotFoundError,
+            json.JSONDecodeError, KeyError, TypeError):
+        return set(), False
+
+
+def branch_ahead_of_base(base_ref, ref):
+    """True if `ref` has >=1 commit not reachable from base (i.e. genuinely ahead)."""
+    try:
+        return int(git("rev-list", "--count", f"{base_ref}..{ref}").strip()) > 0
+    except (subprocess.CalledProcessError, ValueError):
+        return False
+
+
+def list_branches(base_branch, base_ref, pr_branches):
+    """Deployable preview branches under the HAS-PR rule:
+        include a branch iff it has an OPEN PR (any prefix — claude/*, codex/*, …)
+        OR it is a feat/* branch that is genuinely ahead of the base branch.
+        Everything else (ephemeral worktrees with no PR, stale non-feat refs) is
+        excluded. Prefers remote-tracking refs (CI) but merges locals too so it
+        works on a laptop. `pr_branches` is the set from open_pr_branches()."""
     names = set()
     # NB prefix patterns WITHOUT a trailing /* — for-each-ref's fnmatch `*` does not
     # cross `/`, so "refs/remotes/origin/*" misses nested names like feat/mobile.
@@ -91,10 +121,18 @@ def list_branches(base_branch):
                 n = n[len(strip):]
             if n in (base_branch, "HEAD", "gh-pages"):
                 continue
-            if n.startswith("claude/"):
-                continue          # ephemeral Claude Code session-worktree branches, not features
             names.add(n)
-    return sorted(names)
+    included = []
+    for n in sorted(names):
+        has_pr = n in pr_branches
+        feat_ahead = n.startswith("feat/") and branch_ahead_of_base(base_ref, resolve_ref(n))
+        if has_pr or feat_ahead:
+            reason = "has-PR" if has_pr else "feat-ahead"
+            print(f"  include {n} ({reason})")
+            included.append(n)
+        else:
+            print(f"  exclude {n} (no open PR, not feat/*-ahead)")
+    return included
 
 
 def branch_has_marker(ref):
@@ -291,7 +329,8 @@ def main():
     ap = argparse.ArgumentParser(description="Assemble the jetSpan Pages site (root + previews).")
     ap.add_argument("--output", required=True, help="output directory (wiped and rebuilt)")
     ap.add_argument("--base-branch", default="main", help="branch served at the root (default: main)")
-    ap.add_argument("--branches", default="", help="comma list of preview branches (default: auto-detect all non-base)")
+    ap.add_argument("--branches", default="", help="comma list of preview branches (manual override; default: auto-detect via has-PR rule)")
+    ap.add_argument("--pr-repo", default=PR_REPO, help="owner/repo queried for open PRs (has-PR preview rule)")
     ap.add_argument("--data-mode", choices=["copy", "symlink"], default="copy",
                     help="copy = real data files (CI/Pages); symlink = fast local test")
     args = ap.parse_args()
@@ -305,8 +344,14 @@ def main():
     build_root(out, args.base_branch, args.data_mode)
 
     base_ref = resolve_ref(args.base_branch)
-    branches = ([b.strip() for b in args.branches.split(",") if b.strip()]
-                if args.branches else list_branches(args.base_branch))
+    if args.branches:
+        branches = [b.strip() for b in args.branches.split(",") if b.strip()]
+        print(f"  branches: manual override ({len(branches)})")
+    else:
+        pr_branches, gh_ok = open_pr_branches(args.pr_repo)
+        print(f"  open PRs ({'gh ok' if gh_ok else 'gh UNAVAILABLE — feat/*-ahead only'}): "
+              f"{sorted(pr_branches) if pr_branches else '(none)'}")
+        branches = list_branches(args.base_branch, base_ref, pr_branches)
     previews = []
     for b in branches:
         try:
