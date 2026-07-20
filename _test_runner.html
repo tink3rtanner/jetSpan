@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>JetSpan Test Suite</title></head>
+<head><meta charset="utf-8"><title>JetSpan Test Suite</title>
+<script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+</head>
 <body>
 <pre id="output">JetSpan Test Suite — running...</pre>
 <script>
@@ -416,6 +418,41 @@ async function runTests() {
         log('    flight cells: ' + osrmFlight + ' OSRM, ' + havFlight + ' haversine ground_from');
         // at least some flight cells should have OSRM ground_from data
         assert(osrmFlight > 100, 'OSRM flight cells > 100: ' + osrmFlight);
+    } catch (e) {
+        log('  ERROR: ' + e.message);
+        results.fail++;
+    }
+
+    // === 12. ANTIMERIDIAN CHUNK LOADING ===
+    // Regression for the date-line bug: a viewport straddling the antimeridian
+    // reports west > east, and getVisibleParentCells must still return parent
+    // cells on BOTH sides of the line (else chunks on one side never load).
+    // We exercise the REAL function text pulled from isochrone.html (not a copy).
+    log('\n─── 12. Antimeridian Chunk Loading ───');
+    try {
+        if (typeof h3 === 'undefined') throw new Error('h3-js not loaded');
+        const html = await (await fetch('/isochrone.html', {cache: 'no-cache'})).text();
+        const start = html.indexOf('function getVisibleParentCells');
+        if (start === -1) throw new Error('getVisibleParentCells not found');
+        let depth = 0, i = html.indexOf('{', start), seen = false;
+        for (; i < html.length; i++) {
+            if (html[i] === '{') { depth++; seen = true; }
+            else if (html[i] === '}') { depth--; if (seen && depth === 0) { i++; break; } }
+        }
+        const src = html.slice(start, i);
+        const getVisibleParentCells = new Function('h3', src + '\n return getVisibleParentCells;')(h3);
+        const cellLng = (c) => h3.cellToLatLng(c)[1];
+
+        // wrapped bounds near Fiji: covers lng [170,180] ∪ [-180,-170]
+        const cells = getVisibleParentCells({ north: 10, south: -10, west: 170, east: -170 }, 2);
+        assert(cells.length > 0, 'wrapped bounds (west>east) yields cells');
+        assert(cells.some(c => cellLng(c) > 150), 'includes east-of-line cell');
+        assert(cells.some(c => cellLng(c) < -150), 'includes west-of-line cell');
+
+        // normal viewport must not suddenly pull in date-line cells
+        const normal = getVisibleParentCells({ north: 10, south: -10, west: -10, east: 10 }, 2);
+        assert(!normal.some(c => cellLng(c) > 150 || cellLng(c) < -150),
+            'greenwich viewport pulls in no date-line cells');
     } catch (e) {
         log('  ERROR: ' + e.message);
         results.fail++;

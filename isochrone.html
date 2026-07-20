@@ -937,6 +937,24 @@
         </select>
       </div>
     </div>
+    <!-- Preview branch switcher — OFF by default; the toggle reveals the dropdown.
+         Data-driven from /preview/previews.json; navigates to /preview/<slug>/. -->
+    <div class="info-section" id="branch-section">
+      <div class="info-section-label">Preview branch</div>
+      <div class="toggle-row">
+        <span>Branch previews</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-branch-preview">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row" id="branch-row" style="display:none">
+        <span>Branch</span>
+        <select class="theme-select" id="branch-select">
+          <option value="">main (live)</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <!-- Legend -->
@@ -1063,10 +1081,16 @@ function getVisibleParentCells(bounds, parentRes) {
   // step size in degrees — must be smaller than cell diameter to avoid gaps
   // res 1 cells ~4.7° across, res 2 cells ~1.8° across
   const step = parentRes === 1 ? 3 : 1;
+  // When the viewport straddles the antimeridian, getBounds() reports west > east
+  // (e.g. west=170, east=-170). Scan through to east+360 and fold each sample
+  // longitude back into [-180, 180] so BOTH sides of the date line get sampled —
+  // otherwise the inner loop never runs and chunks on one side never load.
+  const lngEnd = bounds.east < bounds.west ? bounds.east + 360 : bounds.east;
   for (let lat = bounds.south; lat <= bounds.north; lat += step) {
-    for (let lng = bounds.west; lng <= bounds.east; lng += step) {
+    for (let lng = bounds.west; lng <= lngEnd; lng += step) {
+      const wrappedLng = ((lng + 180) % 360 + 360) % 360 - 180;
       try {
-        cells.add(h3.latLngToCell(lat, lng, parentRes));
+        cells.add(h3.latLngToCell(lat, wrappedLng, parentRes));
       } catch (e) {
         // skip invalid coords
       }
@@ -4538,6 +4562,71 @@ document.getElementById('toggle-osrm').addEventListener('change', (e) => {
   // H3 contour dissolve here is wasted work and blocks the main thread.
   recolorGrid({ refreshDerived: false });
 });
+
+// --- Branch preview switcher (OFF by default; enable via the settings toggle) -----
+// Previews live at <siteRoot>/preview/<slug>/isochrone.html and share main's data/
+// via a deploy-time fetch-shim. Self-contained: works at the root AND inside a preview.
+function siteRoot() {
+  const p = window.location.pathname;
+  const m = p.match(/^(.*?)\/preview\/[^/]+\//);   // inside /preview/<slug>/ ?
+  if (m) return (m[1] || '') + '/';                // climb back out to the root
+  return p.replace(/[^/]*$/, '');                  // at root: strip the filename
+}
+function currentSlug() {
+  const m = window.location.pathname.match(/\/preview\/([^/]+)\//);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+async function populateBranchSelect() {
+  const sel = document.getElementById('branch-select');
+  if (!sel) return;
+  const here = currentSlug();
+  let previews = [];
+  try {
+    const res = await fetch(siteRoot() + 'preview/previews.json', {cache: 'no-cache'});
+    if (res.ok) {
+      const manifest = await res.json();
+      previews = Array.isArray(manifest) ? manifest : (manifest.previews || []);
+    }
+  } catch (e) { /* no manifest yet (pre-first-deploy) — dropdown just shows main */ }
+  sel.innerHTML = '<option value="">main (live)</option>';
+  previews.slice().sort((a, b) => a.branch.localeCompare(b.branch)).forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.slug;
+    opt.textContent = p.branch;
+    sel.appendChild(opt);
+  });
+  sel.value = here;
+  // if we're on a preview not (yet) in the manifest, add it so it still shows
+  if (here && !previews.some(p => p.slug === here)) {
+    const opt = document.createElement('option');
+    opt.value = here; opt.textContent = here + ' (current)';
+    sel.appendChild(opt); sel.value = here;
+  }
+}
+document.getElementById('branch-select').addEventListener('change', (e) => {
+  const slug = e.target.value;
+  if (slug === currentSlug()) return;              // already here
+  const dest = slug
+    ? siteRoot() + 'preview/' + encodeURIComponent(slug) + '/isochrone.html'
+    : siteRoot() + 'isochrone.html';               // "" == back to main/live
+  window.location.href = dest;
+});
+// the settings switch: OFF by default, reveals the dropdown when enabled (persisted)
+document.getElementById('toggle-branch-preview').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  try { localStorage.setItem('jetspan-branch-preview', on ? '1' : '0'); } catch (err) {}
+  document.getElementById('branch-row').style.display = on ? '' : 'none';
+  if (on) populateBranchSelect();
+});
+(() => {
+  let on = false;
+  try { on = localStorage.getItem('jetspan-branch-preview') === '1'; } catch (e) {}
+  const cb = document.getElementById('toggle-branch-preview');
+  if (cb) cb.checked = on;
+  const row = document.getElementById('branch-row');
+  if (row) row.style.display = on ? '' : 'none';
+  if (on) populateBranchSelect();
+})();
 
 // color scale slider: recolor grid + update legend on change
 // PERF (2026-07-07): recolorGrid() rebuilds the contour dissolve — far too heavy to run

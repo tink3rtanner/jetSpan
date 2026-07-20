@@ -1,0 +1,100 @@
+# Deploy the jetSpan site to GitHub Pages via Actions (not the legacy branch source).
+#
+# WHAT IT PUBLISHES
+#   /                       main's front-end + the FULL 77MB data/ payload (shared)
+#   /preview/<slug>/        every OTHER branch's FRONT-END ONLY (data-shared via shim)
+#   /preview/index.html     data-driven branch-selector landing page
+#   /preview/previews.json  manifest the settings dropdown + landing page both read
+#
+# THE HARD CONSTRAINT: data/ is copied ONCE at the root. Previews carry no data;
+# an injected fetch-shim repoints their data/ calls to the shared root copy. So the
+# published size stays ~= main (77MB) + N * front-end (~200KB), never N * 80MB.
+#
+# TRUST BOUNDARY: this deploy workflow is loaded from main only. Feature-branch
+# pushes run the separate read-only "Validate branch preview" workflow; its
+# successful completion emits workflow_run, which executes THIS trusted main
+# workflow. Never consume an artifact or executable script from that untrusted
+# run. We rebuild from refs using the builder checked out from main.
+
+name: Deploy Pages (main + branch previews)
+
+on:
+  push:
+    branches: [main]
+  delete:                     # branch deleted -> rebuild so its preview is pruned
+  workflow_dispatch:          # trusted manual rebuild; dispatch from main
+  workflow_run:
+    workflows: ["Validate branch preview"]
+    types: [completed]
+
+# one deploy at a time; let an in-flight run finish (don't cancel a publish)
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read        # gh pr list — the has-PR preview filter
+
+jobs:
+  # This build always checks out main. Feature code is archived as preview
+  # content, but never executed as part of this privileged workflow.
+  build:
+    # workflow_run uses the workflow definition and commit from the default branch.
+    # Only successful branch validation runs should cause a live preview rebuild.
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') &&
+      (github.event_name != 'delete' || github.event.ref_type == 'branch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history, all branches)
+        uses: actions/checkout@v4
+        with:
+          ref: main             # always execute trusted deploy code from main
+          fetch-depth: 0        # need every branch's tip for git archive
+
+      - name: Fetch all branches as remote-tracking refs
+        run: git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Assemble site (root + shared-data previews)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # gh pr list auth (has-PR filter)
+        run: |
+          python3 scripts/build-preview-site.py \
+            --output _site \
+            --base-branch main \
+            --data-mode copy
+          echo "--- published tree (top 2 levels) ---"
+          find _site -maxdepth 2 -type d | sort
+          echo "--- manifest ---"
+          cat _site/preview/previews.json
+          echo "--- total published size ---"
+          du -sh _site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  # Keep the github-pages environment restricted to the custom `main` policy.
+  # workflow_run executes with the default branch ref, so trusted rebuilds pass;
+  # manually dispatching a feature-branch copy remains blocked by the environment.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

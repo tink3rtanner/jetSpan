@@ -1,0 +1,14 @@
+{
+  "name": "jetspan-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests for logic in isochrone.html. `npm test` = fast node unit tests (pure fns via real h3-js). `npm run test:browser` = headless chromium run of the full _test_runner.html suite.",
+  "scripts": {
+    "test": "node viewport-cells.test.mjs",
+    "test:browser": "node run-browser-suite.mjs"
+  },
+  "devDependencies": {
+    "h3-js": "4.1.0",
+    "playwright": "^1.61.1"
+  }
+}

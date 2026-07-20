@@ -1,0 +1,40 @@
+# Read-only feature-branch gate. A successful run wakes the trusted deploy
+# workflow on main via workflow_run; this workflow never receives Pages or OIDC
+# write permissions and never publishes its artifact.
+name: Validate branch preview
+
+on:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all branches as remote-tracking refs
+        run: git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Set up local-compatible Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Test preview builder
+        run: python3 -m unittest scripts/test_preview_build.py
+
+      - name: Assemble this branch as a local-style preview
+        run: |
+          python3 scripts/build-preview-site.py \
+            --output _preview_validation \
+            --base-branch main \
+            --branches "$GITHUB_REF_NAME" \
+            --data-mode symlink
+          test -f _preview_validation/preview/previews.json
