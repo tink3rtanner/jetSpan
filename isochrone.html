@@ -897,18 +897,6 @@
         </select>
       </div>
     </div>
-    <!-- Preview branch switcher: data-driven from /preview/previews.json.
-         Hidden until the manifest loads (populateBranchSelect). Selecting a
-         branch navigates to its front-end-only preview at /preview/<branch>/. -->
-    <div class="info-section" id="branch-section" style="display:none">
-      <div class="info-section-label">Preview branch</div>
-      <div class="toggle-row" id="branch-row">
-        <span>Branch</span>
-        <select class="theme-select" id="branch-select">
-          <option value="">main (live)</option>
-        </select>
-      </div>
-    </div>
   </div>
 
   <!-- Legend -->
@@ -4368,76 +4356,6 @@ document.getElementById('palette-select').addEventListener('change', (e) => {
 document.getElementById('linestyle-select').addEventListener('change', (e) => {
   setLineStyle(e.target.value);
 });
-
-// --- Branch preview switcher -----------------------------------------------
-// Previews live at <siteRoot>/preview/<branch>/isochrone.html and SHARE main's
-// data/ payload (a fetch-shim injected at deploy time repoints their data/ calls
-// back to the shared root copy — no data is duplicated per branch). The dropdown
-// and the standalone /preview/index.html both read the same /preview/previews.json
-// manifest, so the branch list is data-driven and never hand-maintained.
-
-// Branch names may contain "/" (feat/mobile) so previews are keyed by a URL-safe
-// SLUG (feat-mobile); the manifest carries both {branch, slug} for display+nav.
-
-// siteRoot(): absolute path to the site root ("/jetSpan/" on Pages, "/" locally),
-// derived from the current URL so it works both at root and inside a preview.
-function siteRoot() {
-  const p = window.location.pathname;
-  const m = p.match(/^(.*?)\/preview\/[^/]+\//);   // inside /preview/<slug>/ ?
-  if (m) return (m[1] || '') + '/';                // climb back out to the root
-  return p.replace(/[^/]*$/, '');                  // at root: strip the filename
-}
-
-// currentSlug(): the preview slug this page is serving, "" for main/live (root).
-function currentSlug() {
-  const m = window.location.pathname.match(/\/preview\/([^/]+)\//);
-  return m ? decodeURIComponent(m[1]) : '';
-}
-
-async function populateBranchSelect() {
-  const sel = document.getElementById('branch-select');
-  const section = document.getElementById('branch-section');
-  if (!sel) return;
-  const here = currentSlug();
-  let previews = [];
-  try {
-    const res = await fetch(siteRoot() + 'preview/previews.json', {cache: 'no-cache'});
-    if (res.ok) {
-      const manifest = await res.json();
-      previews = Array.isArray(manifest) ? manifest : (manifest.previews || []);
-    }
-  } catch (e) { /* no manifest yet (pre-first-deploy) — dropdown just shows main */ }
-
-  // "main (live)" is always the first option; value "" == root.
-  sel.innerHTML = '<option value="">main (live)</option>';
-  previews.slice().sort((a, b) => a.branch.localeCompare(b.branch)).forEach(p => {
-    const opt = document.createElement('option');
-    opt.value = p.slug;
-    opt.textContent = p.branch;
-    sel.appendChild(opt);
-  });
-  // reflect the preview we're currently viewing
-  sel.value = here;
-  // if we're on a preview not (yet) in the manifest, add it so it still shows
-  if (here && !previews.some(p => p.slug === here)) {
-    const opt = document.createElement('option');
-    opt.value = here; opt.textContent = here + ' (current)';
-    sel.appendChild(opt); sel.value = here;
-  }
-  // only reveal the switcher when there's somewhere to switch to
-  if (section && (previews.length > 0 || here)) section.style.display = '';
-}
-
-document.getElementById('branch-select').addEventListener('change', (e) => {
-  const slug = e.target.value;
-  if (slug === currentSlug()) return;              // already here
-  const dest = slug
-    ? siteRoot() + 'preview/' + encodeURIComponent(slug) + '/isochrone.html'
-    : siteRoot() + 'isochrone.html';               // "" == back to main/live
-  window.location.href = dest;
-});
-
-populateBranchSelect();
 
 // Initialize — apply saved/default theme chrome BEFORE the map spins up
 // (initMap reads THEMES[currentTheme].basemap; layer paint reads it on load)
