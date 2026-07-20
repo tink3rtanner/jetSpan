@@ -20,6 +20,7 @@ import os
 import time
 import math
 import argparse
+import multiprocessing as mp
 from pathlib import Path
 from datetime import datetime
 
@@ -32,6 +33,45 @@ try:
 except ImportError:
     print("h3 not installed. run: pip install h3")
     exit(1)
+
+# land/water mask — used to decide whether a beyond-crawl-radius cell with no
+# OSRM data should get a haversine ground estimate (land) or be dropped (ocean).
+# see query_cell_fast's OSRM_CRAWL_RADIUS_KM branch + ROUTING.md snap-artifact section.
+try:
+    from global_land_mask import globe as _globe
+
+    def is_land(lat, lng):
+        """True if (lat, lng) is over land per the bundled ~1km global mask."""
+        return bool(_globe.is_land(lat, lng))
+except ImportError:
+    _globe = None
+
+    def is_land(lat, lng):
+        # no mask installed — fail CLOSED (treat as ocean) so we never
+        # reintroduce the far-offshore snap blobs ROUTING.md describes. the
+        # cost is that the 200-400km land holes stay unfilled. install
+        # global-land-mask (pip install global-land-mask) to fill them.
+        return False
+
+
+def cell_contains_land(cell):
+    """True if an h3 cell touches ANY land (center or a boundary vertex).
+
+    Used to suppress painting of PURE-OCEAN cells — non-destinations that only
+    get colored via OSRM coastal-snap or the near-island haversine fallback (the
+    offshore "blob" artifacts). Testing containment, not just the center, keeps
+    coarse coastal cells (water center but a coastline inside) from being wrongly
+    dropped. Fails OPEN (keeps the cell) when no land mask is installed, so
+    absent the mask behavior is unchanged."""
+    if _globe is None:
+        return True
+    lat, lng = h3.cell_to_latlng(cell)
+    if bool(_globe.is_land(lat, lng)):
+        return True
+    for vlat, vlng in h3.cell_to_boundary(cell):
+        if bool(_globe.is_land(vlat, vlng)):
+            return True
+    return False
 
 
 # =============================================================================
@@ -47,8 +87,19 @@ CHUNKED_RESOLUTIONS = [5, 6]
 # which parent resolution to group chunks by
 CHUNK_PARENT_RES = {5: 1, 6: 2}
 
-# max ground distance from airport to cell (km)
+# max ground distance from airport to cell (km). applies to OCEAN cells and to
+# the origin drive-only check.
 MAX_GROUND_KM = 400
+
+# extended ground reach for LAND cells (km). remote-interior land can sit far
+# from its nearest REACHABLE airport (deep sahara/sahel cells are 600-830km
+# out; AU outback ~470-590km), so without a longer reach they render as white
+# holes. gated by a land-mask check so it never paints ocean. 1000km fills
+# ~99.2% of global land res4 cells — the sweet spot: it covers every measured
+# sahara hole, and past ~1000km the k_rings bucket search (not the cap) becomes
+# the limiter, so raising it further buys almost nothing. the ~0.8% still empty
+# are genuine >1000km-from-any-airport extremes (tiny islands, deep arctic).
+EXTENDED_GROUND_KM = 1000
 
 # OSRM crawl radius (km) — must match osrm-crawler.py MAX_DRIVE_KM.
 # cells within this radius with no OSRM data are water/unreachable.
@@ -335,10 +386,20 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
     best_total = float('inf')
     best_info = None
 
+    # land cells get a longer ground reach than ocean cells. remote-interior
+    # cells (outback, siberia, sahara, amazon) can sit 400-600km from their
+    # NEAREST REACHABLE airport — beyond MAX_GROUND_KM — because the closer
+    # airstrips have no flights into the origin's network and so aren't
+    # candidates. without this they fall through the candidate scan entirely
+    # and render as white holes. the land gate keeps the extended reach from
+    # painting ocean cells (the snap-blob failure mode ROUTING.md describes).
+    cell_is_land = is_land(lat, lng)
+    ground_limit = EXTENDED_GROUND_KM if cell_is_land else MAX_GROUND_KM
+
     for bucket in nearby_buckets:
         for code, apt_lat, apt_lng, result in spatial_index.get(bucket, []):
             dist_km = haversine_km(lat, lng, apt_lat, apt_lng)
-            if dist_km > MAX_GROUND_KM:
+            if dist_km > ground_limit:
                 continue
 
             # ground_from: prefer OSRM, fall back to haversine.
@@ -348,16 +409,23 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
             osrm_time = osrm_ground_time(osrm_data, code, lat, lng)
             used_osrm = False
             if osrm_time == -1:
-                # no OSRM data for this airport at all — haversine fallback
+                # no OSRM data for this airport at all — haversine fallback.
+                # (beyond MAX_GROUND_KM only reachable here for land cells, per
+                # the ground_limit gate above, so this can't paint ocean.)
                 ground_from = estimate_ground_minutes(dist_km)
             elif osrm_time is None:
                 # airport has OSRM data but cell not found
                 if dist_km <= OSRM_CRAWL_RADIUS_KM:
                     continue  # within crawl radius → water/unreachable
+                elif cell_is_land:
+                    # beyond crawl radius AND on land — OSRM simply wasn't
+                    # crawled this far out, so backfill with a haversine
+                    # estimate. the land gate keeps far-offshore ocean cells
+                    # from getting fake times (the snap-blob failure mode);
+                    # snap blobs are a within-radius problem, not this branch.
+                    ground_from = estimate_ground_minutes(dist_km)
                 else:
-                    # beyond crawl radius — OSRM was crawled for this airport
-                    # but didn't include this cell. trust that: it's water,
-                    # unreachable, or too far. don't backfill with haversine.
+                    # beyond crawl radius and over water — drop it.
                     continue
             else:
                 ground_from = osrm_time
@@ -523,44 +591,114 @@ def compact_cell(travel_time, route):
     return cell
 
 
+# work-unit size for the parallel path (cells per chunk shipped to a worker).
+# big enough that per-chunk IPC/pickle overhead is negligible, small enough to
+# keep progress smooth and load balanced.
+CHUNK_SIZE = 20000
+
+# shared read-only context for pool workers. populated in the PARENT right
+# before the pool is created; fork()ed workers inherit it via copy-on-write, so
+# the large structures (osrm_data ~1.5M cells, spatial_index, airports) are
+# never pickled to spin up a worker. this REQUIRES the 'fork' start method —
+# 'spawn'/'forkserver' would give workers an empty _WORKER.
+_WORKER = {}
+
+
+def _process_cell_chunk(cells_chunk):
+    """worker entry: route a contiguous slice of cells. returns ONLY the
+    computed cells (dict) + counts, so skipped ocean cells cost no IPC."""
+    spatial_index = _WORKER['spatial_index']
+    airports = _WORKER['airports']
+    origin_cfg = _WORKER['origin_cfg']
+    osrm_data = _WORKER['osrm_data']
+    origin_ground = _WORKER['origin_ground']
+    local = {}
+    computed = 0
+    for cell in cells_chunk:
+        if not cell_contains_land(cell):
+            continue  # pure-ocean cell — non-destination, skip (no blob)
+        lat, lng = h3.cell_to_latlng(cell)
+        travel_time, route = query_cell_fast(
+            lat, lng, spatial_index, airports, origin_cfg,
+            osrm_data=osrm_data, origin_ground=origin_ground)
+        if travel_time is not None:
+            local[cell] = compact_cell(travel_time, route)
+            computed += 1
+    return local, computed, len(cells_chunk) - computed
+
+
+def _print_progress(done, total, start):
+    pct = done / total * 100
+    elapsed = time.time() - start
+    rate = done / elapsed if elapsed else 0
+    eta = (total - done) / rate if rate else 0
+    print(f"  {pct:.1f}% ({done:,}/{total:,}) - {rate:.0f} cells/s - eta {eta:.0f}s")
+
+
 def iterate_resolution(res, spatial_index, airports, origin_cfg,
-                       osrm_data=None, origin_ground=None):
-    """iterate all h3 cells at a resolution, return dict of cell -> compact data."""
+                       osrm_data=None, origin_ground=None, jobs=1):
+    """iterate all h3 cells at a resolution, return dict of cell -> compact data.
+    jobs>1 fans the cell loop across `jobs` forked workers. the merge preserves
+    the serial cell order (contiguous chunks consumed in-order via imap), so the
+    output is byte-identical to the jobs=1 path."""
     start = time.time()
     cells = get_h3_cells_global(res)
-    print(f"  {len(cells):,} cells to process")
+    print(f"  {len(cells):,} cells to process" + (f" ({jobs} workers)" if jobs > 1 else ""))
 
     res_data = {}
     computed = 0
     skipped = 0
 
-    for i, cell in enumerate(cells):
-        # progress every 50k cells (res 5-6 have millions)
-        if i % 50000 == 0 and i > 0:
-            pct = i / len(cells) * 100
-            elapsed = time.time() - start
-            rate = i / elapsed
-            eta = (len(cells) - i) / rate
-            print(f"  {pct:.1f}% ({i:,}/{len(cells):,}) - {rate:.0f} cells/s - eta {eta:.0f}s")
-
-        lat, lng = h3.cell_to_latlng(cell)
-        travel_time, route = query_cell_fast(
-            lat, lng, spatial_index, airports, origin_cfg,
-            osrm_data=osrm_data, origin_ground=origin_ground
-        )
-
-        if travel_time is not None:
-            res_data[cell] = compact_cell(travel_time, route)
-            computed += 1
-        else:
-            skipped += 1
+    if jobs <= 1:
+        # serial path — unchanged behavior
+        for i, cell in enumerate(cells):
+            # progress every 50k cells (res 5-6 have millions)
+            if i % 50000 == 0 and i > 0:
+                _print_progress(i, len(cells), start)
+            if not cell_contains_land(cell):
+                skipped += 1
+                continue  # pure-ocean cell — non-destination, skip (no blob)
+            lat, lng = h3.cell_to_latlng(cell)
+            travel_time, route = query_cell_fast(
+                lat, lng, spatial_index, airports, origin_cfg,
+                osrm_data=osrm_data, origin_ground=origin_ground)
+            if travel_time is not None:
+                res_data[cell] = compact_cell(travel_time, route)
+                computed += 1
+            else:
+                skipped += 1
+    else:
+        # parallel path — share big read-only structures via COW fork.
+        _WORKER['spatial_index'] = spatial_index
+        _WORKER['airports'] = airports
+        _WORKER['origin_cfg'] = origin_cfg
+        _WORKER['osrm_data'] = osrm_data
+        _WORKER['origin_ground'] = origin_ground
+        chunks = [cells[i:i + CHUNK_SIZE] for i in range(0, len(cells), CHUNK_SIZE)]
+        ctx = mp.get_context('fork')  # REQUIRED: workers inherit _WORKER via COW
+        done = 0
+        next_report = 50000
+        try:
+            with ctx.Pool(processes=jobs) as pool:
+                # imap (ordered) over contiguous chunks → res_data insertion
+                # order matches the serial path → byte-identical output.
+                for local, c, s in pool.imap(_process_cell_chunk, chunks):
+                    res_data.update(local)
+                    computed += c
+                    skipped += s
+                    done += c + s
+                    if done >= next_report:
+                        _print_progress(done, len(cells), start)
+                        next_report += 50000
+        finally:
+            _WORKER.clear()  # drop refs so worker COW pages can be reclaimed
 
     elapsed = time.time() - start
     print(f"  done in {elapsed:.1f}s: {computed:,} computed, {skipped:,} skipped")
     return res_data, computed, skipped, elapsed
 
 
-def precompute_origin(origin_name, airports, routes):
+def precompute_origin(origin_name, airports, routes, jobs=1):
     """pre-compute isochrone data using dijkstra routing."""
 
     if origin_name not in DJ_ORIGINS:
@@ -572,6 +710,14 @@ def precompute_origin(origin_name, airports, routes):
     print(f"\n{'='*60}")
     print(f"pre-computing isochrone for {origin_cfg['name']}")
     print(f"{'='*60}")
+    if _globe is not None:
+        print(f"  land mask: ON — land cells reach airports up to {EXTENDED_GROUND_KM}km "
+              f"(ocean stays {MAX_GROUND_KM}km)")
+    else:
+        print("  land mask: OFF (global-land-mask not installed) — remote land")
+        print("             holes will NOT fill. run: pip install global-land-mask")
+    if jobs > 1:
+        print(f"  cell iteration: {jobs} parallel workers")
 
     # step 1: run dijkstra (once)
     print("\nrunning dijkstra...")
@@ -625,7 +771,7 @@ def precompute_origin(origin_name, airports, routes):
         print(f"\nresolution {res}...")
         res_data, computed, skipped, elapsed = iterate_resolution(
             res, spatial_index, airports, origin_cfg,
-            osrm_data=osrm_data, origin_ground=origin_ground
+            osrm_data=osrm_data, origin_ground=origin_ground, jobs=jobs
         )
 
         if res in BASE_RESOLUTIONS:
@@ -732,6 +878,10 @@ def main():
                         help="Compute all configured origins")
     parser.add_argument("--base-only", action="store_true",
                         help="Only compute base resolutions (1-4), skip chunks")
+    parser.add_argument("--jobs", "-j", type=int, default=1,
+                        help="Parallel workers for cell iteration (default: 1 = "
+                             "serial). Use e.g. -j3 to fan across cores; leaves "
+                             "headroom for the box's other services.")
     args = parser.parse_args()
 
     print("loading data...")
@@ -748,7 +898,7 @@ def main():
     origins_to_compute = list(DJ_ORIGINS.keys()) if args.all else [args.origin]
 
     for origin in origins_to_compute:
-        base_data, route_table, chunk_data = precompute_origin(origin, airports, routes)
+        base_data, route_table, chunk_data = precompute_origin(origin, airports, routes, jobs=args.jobs)
         if base_data:
             save_result(origin, base_data, route_table, chunk_data)
 
