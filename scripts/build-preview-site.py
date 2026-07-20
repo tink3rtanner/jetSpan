@@ -64,6 +64,82 @@ FETCH_SHIM = """<script>
 </script>
 """
 
+# Branch-switcher overlay injected into EVERY preview page (shared- AND full-data)
+# at deploy time. A preview built from a branch whose own isochrone.html predates
+# the in-app selector would otherwise be a DEAD-END — no way to switch branch or
+# get back to main. This deploy-time overlay guarantees a consistent switcher on
+# every preview, wired to the shared /preview/previews.json, regardless of the
+# branch's own code. Raw Python string so the JS regex backslashes stay single.
+SELECTOR_OVERLAY = r"""<div id="jetspan-preview-switcher" role="navigation" aria-label="branch preview switcher">
+  <span class="jps-label">preview</span>
+  <select id="jetspan-preview-select" aria-label="switch branch preview"></select>
+</div>
+<style>
+#jetspan-preview-switcher{position:fixed;top:8px;left:50%;transform:translateX(-50%);
+  z-index:2147483000;display:flex;align-items:center;gap:6px;
+  font:12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:rgba(18,20,15,.86);color:#e8e4d8;border:1px solid #4a5a28;
+  border-radius:999px;padding:5px 10px 5px 13px;box-shadow:0 2px 10px rgba(0,0,0,.35);
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);max-width:92vw;}
+#jetspan-preview-switcher .jps-label{text-transform:uppercase;letter-spacing:.6px;
+  font-size:10px;color:#b7c47a;white-space:nowrap;}
+#jetspan-preview-select{font:inherit;color:#e8e4d8;background:#191b14;
+  border:1px solid #2c2e26;border-radius:999px;padding:3px 9px;max-width:64vw;cursor:pointer;}
+#jetspan-preview-select:focus{outline:1px solid #6b7a3a;}
+</style>
+<script>
+/* jetSpan preview branch-switcher overlay (injected at deploy time into EVERY
+   preview page so none is a dead-end). Reads the shared /preview/previews.json,
+   climbing to the site root the same way the fetch-shim does. Self-contained +
+   namespaced so it can't collide with the branch's own code. */
+(function () {
+  function siteRoot() {
+    var p = window.location.pathname;
+    var m = p.match(/^(.*?)\/preview\/[^/]+\//);   // inside /preview/<slug>/ ?
+    if (m) return (m[1] || "") + "/";              // climb back out to the root
+    return p.replace(/[^/]*$/, "");                // at root: strip the filename
+  }
+  function currentSlug() {
+    var m = window.location.pathname.match(/\/preview\/([^/]+)\//);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+  function go(slug) {
+    var root = siteRoot();
+    window.location.href = slug
+      ? root + "preview/" + encodeURIComponent(slug) + "/isochrone.html"
+      : root + "isochrone.html";                    // "" == back to main/live
+  }
+  var sel = document.getElementById("jetspan-preview-select");
+  if (!sel) return;
+  var here = currentSlug();
+  sel.innerHTML = '<option value="">main (live)</option>';
+  fetch(siteRoot() + "preview/previews.json", {cache: "no-cache"})
+    .then(function (r) { return r.ok ? r.json() : []; })
+    .then(function (m) {
+      var previews = Array.isArray(m) ? m : (m.previews || []);
+      previews.sort(function (a, b) { return (a.branch || "").localeCompare(b.branch || ""); });
+      previews.forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p.slug; o.textContent = p.branch;
+        sel.appendChild(o);
+      });
+      // viewing a preview not yet in the manifest? add it so the control still reflects reality
+      if (here && !previews.some(function (p) { return p.slug === here; })) {
+        var o = document.createElement("option");
+        o.value = here; o.textContent = here + " (current)";
+        sel.appendChild(o);
+      }
+      sel.value = here;
+    })
+    .catch(function () { sel.value = here; });
+  sel.addEventListener("change", function () {
+    if (sel.value === here) return;                  // already here
+    go(sel.value);
+  });
+})();
+</script>
+"""
+
 
 def git(*args):
     """Run a git command, return stdout (text)."""
@@ -197,6 +273,29 @@ def inject_shim(preview_dir):
                 f.write(html)
 
 
+def inject_selector(preview_dir):
+    """Insert the branch-switcher overlay right after <body> in every preview .html.
+    EVERY preview gets it (shared- and full-data alike) so no preview is a dead-end,
+    even when the branch's own isochrone.html predates the in-app selector. Idempotent."""
+    for root, _dirs, files in os.walk(preview_dir):
+        for fn in files:
+            if not fn.endswith(".html"):
+                continue
+            path = os.path.join(root, fn)
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                html = f.read()
+            if "jetspan-preview-switcher" in html:
+                continue  # idempotent
+            # overlay is position:fixed, so anchor it just inside <body>; fall back to top
+            m = re.search(r"<body[^>]*>", html, re.IGNORECASE)
+            if m:
+                html = html[:m.end()] + "\n" + SELECTOR_OVERLAY + html[m.end():]
+            else:
+                html = SELECTOR_OVERLAY + html
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+
+
 def build_root(out, base_branch, data_mode):
     """Assemble the site root from the base branch, incl the shared data/ payload."""
     base_ref = resolve_ref(base_branch)
@@ -233,7 +332,8 @@ def build_preview(out, branch, base_ref, data_mode):
     paths = None if full else [e for e in entries if e != DATA_DIR]
     archive_extract(ref, dest, paths)
     if not full:
-        inject_shim(dest)  # only shared-data previews need the data repoint
+        inject_shim(dest)      # only shared-data previews need the data repoint
+    inject_selector(dest)      # EVERY preview gets the branch-switcher (no dead-ends)
     updated, commit = git("log", "-1", "--format=%cI%n%H", ref).splitlines()[:2]
     tag = f" [FULL-DATA: {reason}]" if full else ""
     print(f"  preview/{slug}: {branch}{tag} ({'own data' if full else 'front-end only, shared data'})")
