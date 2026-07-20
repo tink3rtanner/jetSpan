@@ -1,86 +1,72 @@
-# Branch-preview selector + per-branch Pages previews — build status
+# Branch-preview selector + per-branch Pages previews — STATUS
 
-**Branch:** `feat/branch-preview-selector` (pushed to origin) · **Status: DONE, awaiting the one gated flip (josh's call).**
-Built 2026-07-20 by a dedicated jetSpan session spawned by jarvis.
+**Branch:** `feat/branch-preview-selector` (PR #1) · **Status: LIVE.** Pages is now served by
+GitHub Actions; previews are public. Built + shipped 2026-07-20 by a jetSpan session (jarvis).
 
-## What it does (josh's intent)
-Live default stays `main` at the root URL, untouched. The settings menu gets a **Branch**
-dropdown; picking a branch navigates to that branch's preview at `/preview/<slug>/isochrone.html`
-(and "main (live)" navigates back to root). A standalone **`/preview/index.html`** landing page
-lists every preview. Both the dropdown and the landing page are populated from a data-driven
-`/preview/previews.json` manifest — the branch list is never hand-maintained.
+## Live URLs (relay to josh)
+- **Root (live default = main content):** https://tink3rtanner.github.io/jetSpan/isochrone.html
+- **Branch-selector landing:** https://tink3rtanner.github.io/jetSpan/preview/
+- **A live preview (has the Branch dropdown):** https://tink3rtanner.github.io/jetSpan/preview/feat-branch-preview-selector/isochrone.html
+- **Manifest:** https://tink3rtanner.github.io/jetSpan/preview/previews.json
 
-## THE hard constraint — shared data, satisfied
-`data/` is **77MB**. It is published **once, at the site root**. Each `/preview/<slug>/` is
-**front-end only** (~200KB). A tiny **fetch-shim**, injected into every preview HTML at deploy
-time, rewrites that page's relative `data/…` fetches to climb back to the shared root copy
-(`../../data/…`). So a preview adds front-end weight only — **no data is ever duplicated per
-branch**. Verified: a preview loads all data with **zero 404s**; the preview's own `data/` path
-is 404 (nothing there); published total = **103MB** for 5 previews (77MB data + front-ends),
-comfortably under the 1GB Pages cap even at a dozen+ branches.
+Other live previews: `/preview/feat-mobile/isochrone.html`, `/preview/feat-vintage-theme/isochrone.html`,
+`/preview/feat-click-to-pin-hex/isochrone.html`, `/preview/feat-color-gradient/isochrone.html`.
 
-Opt-in exception for a branch that *regenerates* data: drop a `.preview-full-data` marker file
-in that branch's root and it gets its own `data/` copy (no shim). Default = shared.
+## What it does
+The settings menu has a **Branch** dropdown → navigates to `/preview/<slug>/isochrone.html`
+("main (live)" → root). A standalone **`/preview/index.html`** lists every preview. Both are
+populated from the data-driven **`/preview/previews.json`** manifest — never hand-maintained.
+
+## The hard constraint — shared data, satisfied (verified LIVE)
+`data/` (77MB) is published **once at the site root**. Each preview is **front-end only** (~200KB);
+an injected fetch-shim repoints that page's relative `data/…` calls to the shared root copy. Live
+headless-browser check on `/preview/feat-branch-preview-selector/`: data loaded through the shim
+(4518 airports, isochrone present), **0 data-404s**; the preview's own `data/` path is 404 (nothing
+duplicated). No data is ever copied per branch.
+
+**Auto-detect for data-changing branches (new):** a preview now gets its OWN `data/` copy when
+EITHER it carries the `.preview-full-data` marker (manual override) OR its `data/` differs from the
+base branch (`git diff --quiet` auto-detect). So a data-regenerating branch's preview always shows
+ITS data, never main's — no flag to remember. Verified with a throwaway data-mutating branch →
+`[FULL-DATA: data-differs]`, own data dir, no shim. All 5 current branches = shared (none touch data).
 
 ## Files
 | file | what |
 |---|---|
-| `isochrone.html` | new `#branch-select` in the settings panel (a "Preview branch" section, `theme-select` styling, hidden until the manifest loads) + slug-aware nav JS reading `/preview/previews.json` |
-| `scripts/build-preview-site.py` | assembles the whole site: root (base branch + shared data) + one front-end-only preview per non-main branch + `previews.json` + `preview/index.html`. Read-only (`git archive`), never touches the working tree. `--data-mode copy` (CI) / `symlink` (fast local test). Excludes ephemeral `claude/*` session branches. |
-| `.github/workflows/deploy-pages.yml` | **build** job (any branch: assembles + uploads artifact, validates in CI, no env gate) + **deploy** job (github-pages env, publishes). Triggers: push to any branch, branch `delete` (prune), manual dispatch. |
+| `isochrone.html` | `#branch-select` in the settings panel (hidden until manifest loads) + slug-aware nav JS reading `/preview/previews.json` |
+| `scripts/build-preview-site.py` | assembles root (base + shared data) + one preview per non-main branch; auto-detects data-divergent branches for own-data copies; excludes ephemeral `claude/*`; `--data-mode copy` (CI) / `symlink` (local) |
+| `.github/workflows/deploy-pages.yml` | **build** job (any branch, validates + uploads artifact) + **deploy** job (github-pages env, publishes). Triggers: push to any branch, branch `delete` (prune), dispatch. Workflow-level `concurrency: pages-deploy, cancel-in-progress:false` → concurrent branch pushes QUEUE, never collide. |
 
-Slugs: branch names contain `/` (`feat/mobile`), so previews are keyed by a URL-safe slug
-(`feat-mobile`); the manifest carries both `{branch, slug}` for display + navigation.
+## Go-live changes applied (all done)
+1. **Pages flipped to Actions:** `gh api -X PUT repos/tink3rtanner/jetSpan/pages -f build_type=workflow` → `build_type: workflow`.
+2. **github-pages env relaxed to ALL branches:** `deployment_branch_policy: null`, `protection_rules: []` (was custom-branch-restricted to main/feat-vintage-theme). So every branch push can deploy — no more deploy-job rejections.
+3. **Deploy runs on any-branch push** (already wired; env was the only blocker). Latest run **BOTH jobs green** (build:success, deploy:success).
 
-Whole-site rebuild model: every run rebuilds the entire site from the branches that currently
-exist — so a deleted branch's preview is **auto-pruned** (it's just absent next build), and a
-main push (or dispatch) refreshes **all** previews at once.
-
-## How it was tested
-- **Local assembled site served on http.server**, both `--data-mode symlink` and `copy` (CI path).
-- **Headless-chromium (playwright) load tests**, tracking every network response:
-  - root `isochrone.html`: data loaded (4518 airports, isochrone present), **0 data 404s**.
-  - preview `isochrone.html`: data loaded **through the shim from shared root**, **0 data 404s**, dropdown present with 7 options (main + 6 previews).
-  - `/preview/index.html`: 7 cards rendered.
-  - dropdown **navigation fires** (switching to `feat-mobile` → `/preview/feat-mobile/isochrone.html`). Old branches without the dropdown still load fine and are reachable via the index page.
-- **Real GitHub CI**: the `build` job **succeeded** (assembled root + 5 previews + manifest, artifact uploaded) — run `29760357761`. The `deploy` job was correctly **rejected by github-pages environment protection** on the feature branch → the live site is untouched, exactly as intended pre-authorization.
-
-## Hard gates honored
-`main` untouched · Pages source **not** flipped · no branches deleted · `.claude/` not committed.
-
----
-
-## THE ONE GATED STEP — josh's call, jarvis relays
-
-The live site still serves the **legacy** source (confirmed: `build_type: legacy`, `source main /`).
-Nothing published changes until josh authorizes the flip. To go live:
-
-**1. Merge `feat/branch-preview-selector` → main** (brings the workflow + the dropdown onto the
-   default branch — required, since Actions runs the workflow version on `main` and the env
-   protection only lets the default branch deploy). A PR is open for review.
-
-**2. Flip Pages to Actions publishing:**
+⚠️ **Gotcha (documented for future):** flipping `build_type` to `workflow` **re-creates the
+github-pages environment with the default main-only branch restriction**, silently overwriting an
+earlier `null` relax. Fix = relax the env policy AFTER the flip. If a future Pages reconfig ever
+re-adds the restriction (deploys start failing "not allowed to deploy … environment protection
+rules"), re-run:
 ```bash
-gh api -X PUT repos/tink3rtanner/jetSpan/pages -f build_type=workflow
+printf '{"deployment_branch_policy":null}' | gh api -X PUT repos/tink3rtanner/jetSpan/environments/github-pages --input -
 ```
 
-**3. Trigger the first Actions publish from main:**
-```bash
-gh workflow run deploy-pages.yml --ref main
-```
-(The merge push in step 1 will also trigger it; this is belt-and-suspenders. The deploy job now
-passes env protection because main is the default branch.)
+## Verification (actually run, not claimed)
+- **CI:** run `29762888685` — build:success **and** deploy:success (both green).
+- **Live root** `…/jetSpan/isochrone.html`: 200; headless browser → data loaded (4518 airports, isochrone present), **0 data-404s**.
+- **Live preview** `…/preview/feat-branch-preview-selector/isochrone.html`: 200; headless browser → data loaded via shim, **0 data-404s**, Branch dropdown present with 6 options. Preview-local `data/airports.json` → 404 (correctly not duplicated).
+- `previews.json`, `/preview/`, `/preview/index.html`, root `/data/airports.json` all 200.
 
-After that, `https://tink3rtanner.github.io/jetSpan/` is served by the assembled artifact:
-main at root (with the Branch dropdown), every branch at `/preview/<slug>/`, landing page at
-`/preview/index.html`. Rollback = `gh api -X PUT repos/tink3rtanner/jetSpan/pages -f build_type=legacy`.
+## Gates honored
+`main` branch untouched (`origin/main` still `f2e4c183`) · no branches deleted · main's render intact.
 
-## Notes / trade-offs for josh
-- After the flip, **feature-branch pushes build+validate but don't publish** (env protection =
-  default-branch-only). Previews refresh on **main pushes or manual `workflow run --ref main`**.
-  If you want every feature-branch push to auto-publish its own preview, relax the `github-pages`
-  environment's deployment-branch rule in repo Settings → Environments. Default (main-only) is
-  the safer choice and is what's wired now.
-- Old feature branches (`feat/mobile`, etc.) predate the dropdown, so their preview pages have no
-  in-page switcher — you navigate them via `/preview/index.html`. New branches cut from main
-  after the merge inherit the dropdown automatically.
+## Remaining — josh's call (NOT done, by design)
+**Merge PR #1 → main.** Not done (original "don't merge to main" gate wasn't explicitly lifted).
+Two effects when you do:
+1. The **Branch dropdown appears on the live ROOT** (main's `isochrone.html` gains it). Right now
+   the live root is plain main content; the dropdown is visible inside previews only.
+2. **Main pushes republish the whole site**, and every new branch cut from main inherits the
+   workflow → true "every push publishes" for all future branches.
+   (Today only branches that already carry the workflow — i.e. `feat/branch-preview-selector` — self-trigger a deploy; old branches like `feat/mobile` don't have the workflow file, so their own pushes don't publish, but they're still rebuilt whenever any workflow-bearing branch is pushed.)
+
+Rollback (if ever needed): `gh api -X PUT repos/tink3rtanner/jetSpan/pages -f build_type=legacy` restores branch-served Pages from main/.
