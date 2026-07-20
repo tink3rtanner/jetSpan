@@ -98,10 +98,19 @@ def list_branches(base_branch):
 
 
 def branch_has_marker(ref):
-    """True if the branch's tree contains the full-data opt-in marker."""
+    """True if the branch's tree contains the full-data opt-in marker (manual override)."""
     r = subprocess.run(["git", "cat-file", "-e", f"{ref}:{FULL_DATA_MARKER}"],
                        capture_output=True)
     return r.returncode == 0
+
+
+def branch_data_differs(base_ref, ref):
+    """True if the branch's data/ tree differs from the base branch's data/.
+    git diff --quiet exits 0 = identical, 1 = differs. This is the auto-detect that
+    makes a data-changing branch's preview carry ITS OWN data — no marker to remember."""
+    r = subprocess.run(["git", "diff", "--quiet", base_ref, ref, "--", DATA_DIR],
+                       capture_output=True)
+    return r.returncode == 1
 
 
 def top_level_entries(ref):
@@ -169,22 +178,29 @@ def build_root(out, base_branch, data_mode):
         print(f"  root: {base_branch} full tree (incl data/) copied")
 
 
-def build_preview(out, branch, data_mode):
-    """Assemble one branch's front-end (shared-data) into preview/<slug>/."""
+def build_preview(out, branch, base_ref, data_mode):
+    """Assemble one branch's preview into preview/<slug>/.
+    Default = FRONT-END ONLY, sharing root data via the fetch-shim. A branch gets
+    its OWN data/ copy when EITHER it carries the .preview-full-data marker (manual
+    override) OR its data/ differs from the base branch (auto-detect) — so a
+    data-changing branch's preview always shows ITS data, never main's, no flag needed."""
     ref = resolve_ref(branch)
     slug = slugify(branch)
     dest = os.path.join(out, "preview", slug)
-    full = branch_has_marker(ref)
+    marker = branch_has_marker(ref)
+    differs = branch_data_differs(base_ref, ref)
+    full = marker or differs
+    reason = "marker" if marker else ("data-differs" if differs else "")
     entries = top_level_entries(ref)
     paths = None if full else [e for e in entries if e != DATA_DIR]
     archive_extract(ref, dest, paths)
     if not full:
         inject_shim(dest)  # only shared-data previews need the data repoint
     updated, commit = git("log", "-1", "--format=%cI%n%H", ref).splitlines()[:2]
-    tag = " [FULL-DATA]" if full else ""
-    print(f"  preview/{slug}: {branch}{tag} ({'full' if full else 'front-end only'})")
+    tag = f" [FULL-DATA: {reason}]" if full else ""
+    print(f"  preview/{slug}: {branch}{tag} ({'own data' if full else 'front-end only, shared data'})")
     return {"branch": branch, "slug": slug, "updated": updated,
-            "commit": commit[:12], "full": full}
+            "commit": commit[:12], "full": full, "data": reason or "shared"}
 
 
 def write_manifest(out, previews):
@@ -288,12 +304,13 @@ def main():
     print(f"building site -> {out}  (base={args.base_branch}, data-mode={args.data_mode})")
     build_root(out, args.base_branch, args.data_mode)
 
+    base_ref = resolve_ref(args.base_branch)
     branches = ([b.strip() for b in args.branches.split(",") if b.strip()]
                 if args.branches else list_branches(args.base_branch))
     previews = []
     for b in branches:
         try:
-            previews.append(build_preview(out, b, args.data_mode))
+            previews.append(build_preview(out, b, base_ref, args.data_mode))
         except subprocess.CalledProcessError as e:
             print(f"  !! skipped {b}: {e.stderr.decode() if e.stderr else e}", file=sys.stderr)
 
