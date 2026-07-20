@@ -994,7 +994,10 @@ let LOADED_ROUTE_TABLE = null;
 const loadedChunks = { 5: new Set(), 6: new Set() };
 const loadedChunkData = { 5: new Map(), 6: new Map() };
 const baseResolutionParentIndex = new Map();
+const cellDetailCache = new Map();
 let _chunkLoadingInProgress = false;
+let activeChunkLoads = 0;
+const chunkLoadPromises = { 5: null, 6: null };
 
 async function loadJetSpanData() {
   try {
@@ -1021,6 +1024,7 @@ async function loadIsochroneData(originKey) {
     const res = await fetch(`data/isochrones/${originKey}.json`, {cache: 'no-cache'});
     if (res.ok) {
       LOADED_ISOCHRONE = await res.json();
+      cellDetailCache.clear();
       const totalCells = Object.values(LOADED_ISOCHRONE.resolutions).reduce((a, b) => a + Object.keys(b).length, 0);
       console.log(`[JetSpan] Loaded pre-computed isochrone for ${originKey}: ${totalCells} cells across ${Object.keys(LOADED_ISOCHRONE.resolutions).length} resolutions`);
       // show data version timestamp in stats panel
@@ -1098,7 +1102,16 @@ async function fetchGzipJSON(url) {
 
 // load chunked res 5-6 data for the visible viewport
 async function loadChunksForViewport(resolution, bounds) {
-  if (_chunkLoadingInProgress) return;
+  // Do not silently drop a viewport request while another request for the
+  // same resolution is active. Waiting callers re-check their own viewport
+  // after the current load, while r5 and r6 may still load independently.
+  while (chunkLoadPromises[resolution]) {
+    await chunkLoadPromises[resolution];
+  }
+  let finishLoad;
+  const loadPromise = new Promise(resolve => { finishLoad = resolve; });
+  chunkLoadPromises[resolution] = loadPromise;
+  activeChunkLoads++;
   _chunkLoadingInProgress = true;
 
   try {
@@ -1144,7 +1157,12 @@ async function loadChunksForViewport(resolution, bounds) {
     const elapsed = performance.now() - t0;
     console.log(`[JetSpan] Loaded ${loadedCells} r${resolution} cells in ${elapsed.toFixed(0)}ms (${toFetch.length} chunks)`);
   } finally {
-    _chunkLoadingInProgress = false;
+    activeChunkLoads--;
+    _chunkLoadingInProgress = activeChunkLoads > 0;
+    if (chunkLoadPromises[resolution] === loadPromise) {
+      chunkLoadPromises[resolution] = null;
+    }
+    finishLoad();
   }
 }
 
@@ -1265,6 +1283,45 @@ function getPrecomputedTravelTime(h3Cell, resolution) {
   return parseCellData(cellData);
 }
 
+// Rendered features stay compact. Expand route and timing details only for the
+// handful of cells a user hovers or pins instead of serializing them for every
+// visible hex sent to MapLibre's worker.
+function hydrateCellProperties(properties) {
+  if (!properties || !properties.h3Index) return properties;
+  if (properties.breakdown && properties.route && properties.centroid) {
+    return {
+      ...properties,
+      breakdown: parseMaybeJSON(properties.breakdown),
+      route: parseMaybeJSON(properties.route),
+      centroid: parseMaybeJSON(properties.centroid),
+    };
+  }
+
+  const h3Index = properties.h3Index;
+  let details = cellDetailCache.get(h3Index);
+  if (!details) {
+    const resolution = h3.getResolution(h3Index);
+    const cellData = LOADED_ISOCHRONE?.resolutions?.[String(resolution)]?.[h3Index];
+    if (!cellData) return properties;
+    details = parseCellData(cellData);
+    cellDetailCache.set(h3Index, details);
+    if (cellDetailCache.size > 1024) {
+      cellDetailCache.delete(cellDetailCache.keys().next().value);
+    }
+  }
+
+  const lng = Number(properties.lng);
+  const lat = Number(properties.lat);
+  return {
+    ...properties,
+    breakdown: details.breakdown,
+    route: details.route,
+    centroid: Number.isFinite(lng) && Number.isFinite(lat)
+      ? [lng, lat]
+      : h3.cellToLatLng(h3Index).reverse(),
+  };
+}
+
 // =============================================================================
 // DIRECT RENDERING (skip grid iteration for pre-computed resolutions)
 // =============================================================================
@@ -1273,6 +1330,37 @@ function getPrecomputedTravelTime(h3Cell, resolution) {
 // O(pre-computed cells) instead of O(viewport cells).
 // All resolutions (1-6) are pre-computed; res 5-6 lazy-loaded by viewport.
 // =============================================================================
+
+const CELL_GEOMETRY_CACHE_LIMIT = 80000;
+const CELL_GEOMETRY_EVICT_COUNT = 8000;
+const cellGeometryCache = new Map();
+
+function getCellGeometry(h3Index, centroid) {
+  const cached = cellGeometryCache.get(h3Index);
+  if (cached) return cached;
+
+  let coordinates = h3.cellToBoundary(h3Index).map(([lat, lng]) => [lng, lat]);
+  const lngs = coordinates.map(coordinate => coordinate[0]);
+  if (lngs.some(lng => lng > 90) && lngs.some(lng => lng < -90)) {
+    coordinates = coordinates.map(([lng, lat]) => [lng < 0 ? lng + 360 : lng, lat]);
+  }
+  coordinates.push(coordinates[0]);
+
+  const value = {
+    centroid: [centroid[1], centroid[0]],
+    geometry: { type: 'Polygon', coordinates: [coordinates] },
+  };
+  cellGeometryCache.set(h3Index, value);
+  if (cellGeometryCache.size > CELL_GEOMETRY_CACHE_LIMIT) {
+    const keys = cellGeometryCache.keys();
+    for (let i = 0; i < CELL_GEOMETRY_EVICT_COUNT; i++) {
+      const next = keys.next();
+      if (next.done) break;
+      cellGeometryCache.delete(next.value);
+    }
+  }
+  return value;
+}
 
 function generateHexGridDirect(origin, resolution, viewportBounds) {
   const startTotal = performance.now();
@@ -1358,44 +1446,26 @@ function generateHexGridDirect(origin, resolution, viewportBounds) {
       inViewport++;
 
       const cellData = resData[h3Index];
-      const result = parseCellData(cellData);
+      const totalMinutes = cellData.t ?? cellData.time ?? 0;
+      const osrm = !!cellData.g;
 
       // respect OSRM coverage toggle: green = OSRM, red = haversine
       const color = showOSRMCoverage
-        ? (result.osrm ? '#22c55e' : '#ef4444')
-        : getTimeBandColor(result.totalMinutes);
-      const boundary = h3.cellToBoundary(h3Index);
-
-      // convert boundary to GeoJSON coordinates [lng, lat]
-      let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
-
-      // handle antimeridian crossing
-      const lngs = coordinates.map(c => c[0]);
-      const hasPositive = lngs.some(lng => lng > 90);
-      const hasNegative = lngs.some(lng => lng < -90);
-      if (hasPositive && hasNegative) {
-        coordinates = coordinates.map(([lng, lat]) => [
-          lng < 0 ? lng + 360 : lng,
-          lat
-        ]);
-      }
-      coordinates.push(coordinates[0]); // close polygon
+        ? (osrm ? '#22c55e' : '#ef4444')
+        : getTimeBandColor(totalMinutes);
+      const shape = getCellGeometry(h3Index, centroid);
 
       features.push({
         type: 'Feature',
         properties: {
           h3Index,
-          travelTimeMinutes: result.totalMinutes,
+          travelTimeMinutes: totalMinutes,
           color,
-          breakdown: result.breakdown,
-          route: result.route,
-          centroid: [centroid[1], centroid[0]],
-          osrm: result.osrm || false,
+          lng: shape.centroid[0],
+          lat: shape.centroid[1],
+          osrm,
         },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [coordinates],
-        }
+        geometry: shape.geometry,
       });
     } catch (e) {
       // skip invalid cells
@@ -2047,6 +2117,8 @@ const TIME_BANDS = [
 // intercontinental distances go orange→red (josh 2026-07-06: "more relaxed scaling
 // so most of Europe is green light green maybe yellow ... red when other side of world").
 let colorScale = 3; // slider locked to integers 1-4, default 3x (josh 2026-07-19)
+const timeColorCache = new Map();
+let timeColorCacheScale = colorScale;
 
 // =============================================================================
 // THEME ENGINE
@@ -2065,6 +2137,7 @@ function applyThemeChrome(name) {
 
   // recolor the band table in place (getTimeBandColor reads from it)
   TIME_BANDS.forEach((band, i) => { band.color = theme.bandColors[i]; });
+  timeColorCache.clear();
 
   // legend swatches + title — engraved mode shows the actual translucent
   // wash colour over parchment (matches what the plate renders), so the
@@ -2191,23 +2264,36 @@ function hexLerp(a, b, t) {
 }
 
 function getTimeBandColor(totalMinutes) {
+  if (timeColorCacheScale !== colorScale) {
+    timeColorCache.clear();
+    timeColorCacheScale = colorScale;
+  }
+  const cached = timeColorCache.get(totalMinutes);
+  if (cached) return cached;
   const hours = totalMinutes / 60;
   const continuous = THEMES[currentTheme] && THEMES[currentTheme].continuous;
   for (let i = 0; i < TIME_BANDS.length; i++) {
     const band = TIME_BANDS[i];
     // scale thresholds: higher colorScale = wider bands = more green
     if (hours < band.maxHours * colorScale) {
-      if (!continuous || band.maxHours === Infinity) return band.color;
+      if (!continuous || band.maxHours === Infinity) {
+        timeColorCache.set(totalMinutes, band.color);
+        return band.color;
+      }
       // continuous mode (modern theme): blend toward the next band by
       // position within this band — a smooth gradient instead of hard steps
       const lo = (i > 0 ? TIME_BANDS[i - 1].maxHours : 0) * colorScale;
       const hi = band.maxHours * colorScale;
       const t = Math.max(0, Math.min(1, (hours - lo) / (hi - lo)));
       const next = TIME_BANDS[Math.min(i + 1, TIME_BANDS.length - 1)];
-      return hexLerp(band.color, next.color, t * 0.5); // half-step blend keeps band identity
+      const color = hexLerp(band.color, next.color, t * 0.5);
+      timeColorCache.set(totalMinutes, color);
+      return color; // half-step blend keeps band identity
     }
   }
-  return TIME_BANDS[TIME_BANDS.length - 1].color;
+  const color = TIME_BANDS[TIME_BANDS.length - 1].color;
+  timeColorCache.set(totalMinutes, color);
+  return color;
 }
 
 // recolor existing grid features without regenerating geometry
@@ -2432,7 +2518,7 @@ function buildCentroidGeoJSON() {
     features.push({
       type: 'Feature',
       properties: { w },
-      geometry: { type: 'Point', coordinates: f.properties.centroid },
+      geometry: { type: 'Point', coordinates: [f.properties.lng, f.properties.lat] },
     });
   }
   return { type: 'FeatureCollection', features };
@@ -2633,7 +2719,7 @@ async function initMap() {
     let hoveredH3 = null; // debounce hover-source writes to cell changes
     map.on('mousemove', 'hexgrid-fill', (e) => {
       if (e.features.length > 0) {
-        const props = e.features[0].properties;
+        const props = hydrateCellProperties(e.features[0].properties);
         showTooltip(props);
         // light highlight on the hovered cell (rebuilt from h3, not the
         // rendered feature — tile clipping can truncate the polygon)
@@ -2643,10 +2729,8 @@ async function initMap() {
         }
         // draw route line on hover (works for both flight and drive-only cells)
         try {
-          const route = JSON.parse(props.route);
-          const centroid = JSON.parse(props.centroid);
-          if (route) {
-            map.getSource('route-line').setData(buildRouteGeoJSON(route, centroid));
+          if (props.route) {
+            map.getSource('route-line').setData(buildRouteGeoJSON(props.route, props.centroid));
           }
         } catch(e) {}
       }
@@ -2664,7 +2748,7 @@ async function initMap() {
     // click a hex to pin it (re-click the same hex to unpin)
     map.on('click', 'hexgrid-fill', (e) => {
       if (e.features.length > 0) {
-        togglePin(e.features[0].properties);
+        togglePin(hydrateCellProperties(e.features[0].properties));
       }
     });
 
@@ -3305,7 +3389,7 @@ async function updateGrid(resolution = currentResolution, flyToOrigin = true) {
 
   const sourceStarted = performance.now();
   map.getSource('hexgrid').setData(gridData);
-  map.getSource('origin').setData(generateOriginGeoJSON());
+  if (flyToOrigin) map.getSource('origin').setData(generateOriginGeoJSON());
   perfEntry.sourceSetMs = +(performance.now() - sourceStarted).toFixed(1);
   const derivedStarted = performance.now();
   refreshGridDerived(); // contours/field track every grid change
@@ -3608,8 +3692,9 @@ async function runTests() {
         'feature has valid color: ' + f.properties.color);
       assert(f.properties.travelTimeMinutes > 0,
         'feature has positive travel time: ' + f.properties.travelTimeMinutes + 'min');
-      assert(f.properties.breakdown, 'feature has breakdown');
-      assert(f.properties.route, 'feature has route');
+      const hydrated = hydrateCellProperties(f.properties);
+      assert(hydrated.breakdown, 'feature can hydrate breakdown');
+      assert(hydrated.route, 'feature can hydrate route');
     }
   }
 
@@ -4081,6 +4166,7 @@ function parseMaybeJSON(v) {
 // build the location name, formatted time, and breakdown HTML for a cell's
 // feature properties — shared by the hover tooltip and pinned destination cards
 function buildCellReadout(properties) {
+  properties = hydrateCellProperties(properties);
   const breakdown = parseMaybeJSON(properties.breakdown);
   const route = parseMaybeJSON(properties.route);
 
@@ -4215,23 +4301,19 @@ function clearAllPins() {
 // hex boundary polygon for one cell (same antimeridian handling as
 // generateHexGridDirect) — shared by the pin snapshot and the hover highlight
 function cellBoundaryFeature(h3Index, properties = {}) {
-  const boundary = h3.cellToBoundary(h3Index);
-  let coordinates = boundary.map(([lat, lng]) => [lng, lat]);
-  const lngs = coordinates.map(c => c[0]);
-  if (lngs.some(lng => lng > 90) && lngs.some(lng => lng < -90)) {
-    coordinates = coordinates.map(([lng, lat]) => [lng < 0 ? lng + 360 : lng, lat]);
-  }
-  coordinates.push(coordinates[0]);
+  const latLng = h3.cellToLatLng(h3Index);
+  const shape = getCellGeometry(h3Index, latLng);
   return {
     type: 'Feature',
     properties: { h3Index, color: properties.color },
-    geometry: { type: 'Polygon', coordinates: [coordinates] },
+    geometry: shape.geometry,
   };
 }
 
 // snapshot everything needed to render a pin — independent of the live grid,
 // so pins survive pan/zoom/resolution changes
 function buildPinEntry(properties) {
+  properties = hydrateCellProperties(properties);
   const route = parseMaybeJSON(properties.route);
   const centroid = parseMaybeJSON(properties.centroid);
   const boundaryFeature = cellBoundaryFeature(properties.h3Index, properties);
@@ -4293,8 +4375,13 @@ function renderPinCards() {
 window.pinCellAt = function(lng, lat) {
   const pt = map.project([lng, lat]);
   const feats = map.queryRenderedFeatures(pt, { layers: ['hexgrid-fill'] });
-  if (!feats.length) return false;
-  togglePin(feats[0].properties);
+  let properties = feats[0]?.properties;
+  if (!properties && gridData?.features?.length) {
+    const h3Index = h3.latLngToCell(lat, lng, currentResolution);
+    properties = gridData.features.find(feature => feature.properties.h3Index === h3Index)?.properties;
+  }
+  if (!properties) return false;
+  togglePin(hydrateCellProperties(properties));
   return true;
 };
 window.clearAllPins = clearAllPins;
@@ -4460,6 +4547,7 @@ document.getElementById('toggle-osrm').addEventListener('change', (e) => {
 let _colorScaleTimer = null;
 document.getElementById('color-scale').addEventListener('input', (e) => {
   colorScale = parseFloat(e.target.value);
+  timeColorCache.clear();
   document.getElementById('color-scale-label').textContent = colorScale + '×';
   if (_colorScaleTimer) clearTimeout(_colorScaleTimer);
   _colorScaleTimer = setTimeout(() => {
