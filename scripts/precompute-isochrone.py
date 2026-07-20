@@ -54,6 +54,26 @@ except ImportError:
         return False
 
 
+def cell_contains_land(cell):
+    """True if an h3 cell touches ANY land (center or a boundary vertex).
+
+    Used to suppress painting of PURE-OCEAN cells — non-destinations that only
+    get colored via OSRM coastal-snap or the near-island haversine fallback (the
+    offshore "blob" artifacts). Testing containment, not just the center, keeps
+    coarse coastal cells (water center but a coastline inside) from being wrongly
+    dropped. Fails OPEN (keeps the cell) when no land mask is installed, so
+    absent the mask behavior is unchanged."""
+    if _globe is None:
+        return True
+    lat, lng = h3.cell_to_latlng(cell)
+    if bool(_globe.is_land(lat, lng)):
+        return True
+    for vlat, vlng in h3.cell_to_boundary(cell):
+        if bool(_globe.is_land(vlat, vlng)):
+            return True
+    return False
+
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -595,6 +615,8 @@ def _process_cell_chunk(cells_chunk):
     local = {}
     computed = 0
     for cell in cells_chunk:
+        if not cell_contains_land(cell):
+            continue  # pure-ocean cell — non-destination, skip (no blob)
         lat, lng = h3.cell_to_latlng(cell)
         travel_time, route = query_cell_fast(
             lat, lng, spatial_index, airports, origin_cfg,
@@ -633,6 +655,9 @@ def iterate_resolution(res, spatial_index, airports, origin_cfg,
             # progress every 50k cells (res 5-6 have millions)
             if i % 50000 == 0 and i > 0:
                 _print_progress(i, len(cells), start)
+            if not cell_contains_land(cell):
+                skipped += 1
+                continue  # pure-ocean cell — non-destination, skip (no blob)
             lat, lng = h3.cell_to_latlng(cell)
             travel_time, route = query_cell_fast(
                 lat, lng, spatial_index, airports, origin_cfg,
