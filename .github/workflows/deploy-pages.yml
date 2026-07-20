@@ -39,11 +39,11 @@ permissions:
   id-token: write
 
 jobs:
-  build-deploy:
+  # BUILD runs on any branch (no environment gate) so a feature-branch push
+  # validates the whole assembly + produces the artifact in real CI without
+  # touching the live site.
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - name: Checkout (full history, all branches)
         uses: actions/checkout@v4
@@ -76,6 +76,17 @@ jobs:
         with:
           path: _site
 
+  # DEPLOY is gated by the github-pages environment, whose branch-protection
+  # rule (GitHub default) restricts publishing to the default branch. On a
+  # feature branch this job is rejected by protection = the live site never
+  # changes from a preview push. It publishes on main pushes / manual dispatch.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v4
