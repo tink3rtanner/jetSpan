@@ -1,0 +1,92 @@
+# Deploy the jetSpan site to GitHub Pages via Actions (not the legacy branch source).
+#
+# WHAT IT PUBLISHES
+#   /                       main's front-end + the FULL 77MB data/ payload (shared)
+#   /preview/<slug>/        every OTHER branch's FRONT-END ONLY (data-shared via shim)
+#   /preview/index.html     data-driven branch-selector landing page
+#   /preview/previews.json  manifest the settings dropdown + landing page both read
+#
+# THE HARD CONSTRAINT: data/ is copied ONCE at the root. Previews carry no data;
+# an injected fetch-shim repoints their data/ calls to the shared root copy. So the
+# published size stays ~= main (77MB) + N * front-end (~200KB), never N * 80MB.
+#
+# WHOLE-SITE REBUILD MODEL: every run rebuilds the entire site from the branches
+# that CURRENTLY exist. That means (a) pushing main (or any branch carrying this
+# workflow) refreshes ALL previews, and (b) a deleted branch's preview is pruned
+# automatically — it simply isn't in the next build. The `delete:` trigger fires a
+# rebuild promptly when a branch is removed.
+#
+# GATED: this workflow only takes effect once Pages `build_type` is flipped to
+# "workflow" — that flip is josh's call (see PREVIEW-SELECTOR-STATUS.md). Until
+# then it can run and produce/inspect the artifact without changing the live site.
+
+name: Deploy Pages (main + branch previews)
+
+on:
+  push:
+    branches: ['**']          # any branch carrying this workflow refreshes the whole site
+  delete:                     # branch deleted -> rebuild so its preview is pruned
+  workflow_dispatch:          # manual rebuild
+
+# one deploy at a time; let an in-flight run finish (don't cancel a publish)
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # BUILD runs on any branch (no environment gate) so a feature-branch push
+  # validates the whole assembly + produces the artifact in real CI without
+  # touching the live site.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history, all branches)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # need every branch's tip for git archive
+
+      - name: Fetch all branches as remote-tracking refs
+        run: git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Assemble site (root + shared-data previews)
+        run: |
+          python3 scripts/build-preview-site.py \
+            --output _site \
+            --base-branch main \
+            --data-mode copy
+          echo "--- published tree (top 2 levels) ---"
+          find _site -maxdepth 2 -type d | sort
+          echo "--- manifest ---"
+          cat _site/preview/previews.json
+          echo "--- total published size ---"
+          du -sh _site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  # DEPLOY is gated by the github-pages environment, whose branch-protection
+  # rule (GitHub default) restricts publishing to the default branch. On a
+  # feature branch this job is rejected by protection = the live site never
+  # changes from a preview push. It publishes on main pushes / manual dispatch.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
