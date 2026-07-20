@@ -78,9 +78,11 @@ def list_branches(base_branch):
     """All deployable branches minus the base. Prefers remote-tracking refs (CI),
     falls back to / merges local branches so it works both in CI and on a laptop."""
     names = set()
-    for ref_glob, strip in (("refs/remotes/origin/*", "origin/"),
-                             ("refs/heads/*", "")):
-        out = git("for-each-ref", "--format=%(refname:short)", ref_glob)
+    # NB prefix patterns WITHOUT a trailing /* — for-each-ref's fnmatch `*` does not
+    # cross `/`, so "refs/remotes/origin/*" misses nested names like feat/mobile.
+    for ref_prefix, strip in (("refs/remotes/origin", "origin/"),
+                              ("refs/heads", "")):
+        out = git("for-each-ref", "--format=%(refname:short)", ref_prefix)
         for line in out.splitlines():
             n = line.strip()
             if not n or n.endswith("/HEAD") or n == "origin":
@@ -89,6 +91,8 @@ def list_branches(base_branch):
                 n = n[len(strip):]
             if n in (base_branch, "HEAD", "gh-pages"):
                 continue
+            if n.startswith("claude/"):
+                continue          # ephemeral Claude Code session-worktree branches, not features
             names.add(n)
     return sorted(names)
 
@@ -113,7 +117,7 @@ def archive_extract(ref, dest, paths):
         cmd += ["--", *paths]
     proc = subprocess.run(cmd, check=True, capture_output=True)
     with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tf:
-        tf.extractall(dest)
+        tf.extractall(dest, filter="data")   # 3.12+ safe-extract filter
 
 
 def resolve_ref(branch):
