@@ -20,6 +20,7 @@ import os
 import time
 import math
 import argparse
+import multiprocessing as mp
 from pathlib import Path
 from datetime import datetime
 
@@ -566,44 +567,109 @@ def compact_cell(travel_time, route):
     return cell
 
 
+# work-unit size for the parallel path (cells per chunk shipped to a worker).
+# big enough that per-chunk IPC/pickle overhead is negligible, small enough to
+# keep progress smooth and load balanced.
+CHUNK_SIZE = 20000
+
+# shared read-only context for pool workers. populated in the PARENT right
+# before the pool is created; fork()ed workers inherit it via copy-on-write, so
+# the large structures (osrm_data ~1.5M cells, spatial_index, airports) are
+# never pickled to spin up a worker. this REQUIRES the 'fork' start method —
+# 'spawn'/'forkserver' would give workers an empty _WORKER.
+_WORKER = {}
+
+
+def _process_cell_chunk(cells_chunk):
+    """worker entry: route a contiguous slice of cells. returns ONLY the
+    computed cells (dict) + counts, so skipped ocean cells cost no IPC."""
+    spatial_index = _WORKER['spatial_index']
+    airports = _WORKER['airports']
+    origin_cfg = _WORKER['origin_cfg']
+    osrm_data = _WORKER['osrm_data']
+    origin_ground = _WORKER['origin_ground']
+    local = {}
+    computed = 0
+    for cell in cells_chunk:
+        lat, lng = h3.cell_to_latlng(cell)
+        travel_time, route = query_cell_fast(
+            lat, lng, spatial_index, airports, origin_cfg,
+            osrm_data=osrm_data, origin_ground=origin_ground)
+        if travel_time is not None:
+            local[cell] = compact_cell(travel_time, route)
+            computed += 1
+    return local, computed, len(cells_chunk) - computed
+
+
+def _print_progress(done, total, start):
+    pct = done / total * 100
+    elapsed = time.time() - start
+    rate = done / elapsed if elapsed else 0
+    eta = (total - done) / rate if rate else 0
+    print(f"  {pct:.1f}% ({done:,}/{total:,}) - {rate:.0f} cells/s - eta {eta:.0f}s")
+
+
 def iterate_resolution(res, spatial_index, airports, origin_cfg,
-                       osrm_data=None, origin_ground=None):
-    """iterate all h3 cells at a resolution, return dict of cell -> compact data."""
+                       osrm_data=None, origin_ground=None, jobs=1):
+    """iterate all h3 cells at a resolution, return dict of cell -> compact data.
+    jobs>1 fans the cell loop across `jobs` forked workers. the merge preserves
+    the serial cell order (contiguous chunks consumed in-order via imap), so the
+    output is byte-identical to the jobs=1 path."""
     start = time.time()
     cells = get_h3_cells_global(res)
-    print(f"  {len(cells):,} cells to process")
+    print(f"  {len(cells):,} cells to process" + (f" ({jobs} workers)" if jobs > 1 else ""))
 
     res_data = {}
     computed = 0
     skipped = 0
 
-    for i, cell in enumerate(cells):
-        # progress every 50k cells (res 5-6 have millions)
-        if i % 50000 == 0 and i > 0:
-            pct = i / len(cells) * 100
-            elapsed = time.time() - start
-            rate = i / elapsed
-            eta = (len(cells) - i) / rate
-            print(f"  {pct:.1f}% ({i:,}/{len(cells):,}) - {rate:.0f} cells/s - eta {eta:.0f}s")
-
-        lat, lng = h3.cell_to_latlng(cell)
-        travel_time, route = query_cell_fast(
-            lat, lng, spatial_index, airports, origin_cfg,
-            osrm_data=osrm_data, origin_ground=origin_ground
-        )
-
-        if travel_time is not None:
-            res_data[cell] = compact_cell(travel_time, route)
-            computed += 1
-        else:
-            skipped += 1
+    if jobs <= 1:
+        # serial path — unchanged behavior
+        for i, cell in enumerate(cells):
+            # progress every 50k cells (res 5-6 have millions)
+            if i % 50000 == 0 and i > 0:
+                _print_progress(i, len(cells), start)
+            lat, lng = h3.cell_to_latlng(cell)
+            travel_time, route = query_cell_fast(
+                lat, lng, spatial_index, airports, origin_cfg,
+                osrm_data=osrm_data, origin_ground=origin_ground)
+            if travel_time is not None:
+                res_data[cell] = compact_cell(travel_time, route)
+                computed += 1
+            else:
+                skipped += 1
+    else:
+        # parallel path — share big read-only structures via COW fork.
+        _WORKER['spatial_index'] = spatial_index
+        _WORKER['airports'] = airports
+        _WORKER['origin_cfg'] = origin_cfg
+        _WORKER['osrm_data'] = osrm_data
+        _WORKER['origin_ground'] = origin_ground
+        chunks = [cells[i:i + CHUNK_SIZE] for i in range(0, len(cells), CHUNK_SIZE)]
+        ctx = mp.get_context('fork')  # REQUIRED: workers inherit _WORKER via COW
+        done = 0
+        next_report = 50000
+        try:
+            with ctx.Pool(processes=jobs) as pool:
+                # imap (ordered) over contiguous chunks → res_data insertion
+                # order matches the serial path → byte-identical output.
+                for local, c, s in pool.imap(_process_cell_chunk, chunks):
+                    res_data.update(local)
+                    computed += c
+                    skipped += s
+                    done += c + s
+                    if done >= next_report:
+                        _print_progress(done, len(cells), start)
+                        next_report += 50000
+        finally:
+            _WORKER.clear()  # drop refs so worker COW pages can be reclaimed
 
     elapsed = time.time() - start
     print(f"  done in {elapsed:.1f}s: {computed:,} computed, {skipped:,} skipped")
     return res_data, computed, skipped, elapsed
 
 
-def precompute_origin(origin_name, airports, routes):
+def precompute_origin(origin_name, airports, routes, jobs=1):
     """pre-compute isochrone data using dijkstra routing."""
 
     if origin_name not in DJ_ORIGINS:
@@ -621,6 +687,8 @@ def precompute_origin(origin_name, airports, routes):
     else:
         print("  land mask: OFF (global-land-mask not installed) — remote land")
         print("             holes will NOT fill. run: pip install global-land-mask")
+    if jobs > 1:
+        print(f"  cell iteration: {jobs} parallel workers")
 
     # step 1: run dijkstra (once)
     print("\nrunning dijkstra...")
@@ -674,7 +742,7 @@ def precompute_origin(origin_name, airports, routes):
         print(f"\nresolution {res}...")
         res_data, computed, skipped, elapsed = iterate_resolution(
             res, spatial_index, airports, origin_cfg,
-            osrm_data=osrm_data, origin_ground=origin_ground
+            osrm_data=osrm_data, origin_ground=origin_ground, jobs=jobs
         )
 
         if res in BASE_RESOLUTIONS:
@@ -781,6 +849,10 @@ def main():
                         help="Compute all configured origins")
     parser.add_argument("--base-only", action="store_true",
                         help="Only compute base resolutions (1-4), skip chunks")
+    parser.add_argument("--jobs", "-j", type=int, default=1,
+                        help="Parallel workers for cell iteration (default: 1 = "
+                             "serial). Use e.g. -j3 to fan across cores; leaves "
+                             "headroom for the box's other services.")
     args = parser.parse_args()
 
     print("loading data...")
@@ -797,7 +869,7 @@ def main():
     origins_to_compute = list(DJ_ORIGINS.keys()) if args.all else [args.origin]
 
     for origin in origins_to_compute:
-        base_data, route_table, chunk_data = precompute_origin(origin, airports, routes)
+        base_data, route_table, chunk_data = precompute_origin(origin, airports, routes, jobs=args.jobs)
         if base_data:
             save_result(origin, base_data, route_table, chunk_data)
 
