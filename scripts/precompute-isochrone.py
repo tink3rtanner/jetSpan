@@ -71,11 +71,15 @@ CHUNK_PARENT_RES = {5: 1, 6: 2}
 # the origin drive-only check.
 MAX_GROUND_KM = 400
 
-# extended ground reach for LAND cells (km). remote-interior land can be
-# 400-600km from its nearest REACHABLE airport; without a longer reach those
-# cells render as white holes. gated by a land-mask check so it never paints
-# ocean. measured AU-outback holes top out ~593km from a reachable airport.
-EXTENDED_GROUND_KM = 600
+# extended ground reach for LAND cells (km). remote-interior land can sit far
+# from its nearest REACHABLE airport (deep sahara/sahel cells are 600-830km
+# out; AU outback ~470-590km), so without a longer reach they render as white
+# holes. gated by a land-mask check so it never paints ocean. 1000km fills
+# ~99.2% of global land res4 cells — the sweet spot: it covers every measured
+# sahara hole, and past ~1000km the k_rings bucket search (not the cap) becomes
+# the limiter, so raising it further buys almost nothing. the ~0.8% still empty
+# are genuine >1000km-from-any-airport extremes (tiny islands, deep arctic).
+EXTENDED_GROUND_KM = 1000
 
 # OSRM crawl radius (km) — must match osrm-crawler.py MAX_DRIVE_KM.
 # cells within this radius with no OSRM data are water/unreachable.
