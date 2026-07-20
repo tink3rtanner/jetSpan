@@ -29,6 +29,7 @@ Usage:
         --base-branch feat/branch-preview-selector --data-mode symlink  # fast local test
 """
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -151,6 +152,28 @@ def slugify(branch):
     return re.sub(r"[^A-Za-z0-9._-]", "-", branch)
 
 
+def assign_preview_slugs(branches):
+    """Return deterministic, collision-free slugs while preserving existing URLs.
+
+    A lone branch keeps the historical readable slug. If multiple branch names
+    normalize to the same value, every member of that collision group receives a
+    stable hash suffix so the result is independent of branch enumeration order.
+    """
+    groups = {}
+    for branch in branches:
+        groups.setdefault(slugify(branch), []).append(branch)
+
+    assigned = {}
+    for base, group in groups.items():
+        if len(group) == 1:
+            assigned[group[0]] = base
+            continue
+        for branch in group:
+            digest = hashlib.sha256(branch.encode("utf-8")).hexdigest()[:8]
+            assigned[branch] = f"{base}-{digest}"
+    return assigned
+
+
 def open_pr_branches(repo):
     """Set of head-ref names for OPEN PRs on `repo`, via gh (available in CI with
     GITHUB_TOKEN). Degrades gracefully: any failure (no gh, no auth, no network,
@@ -232,6 +255,33 @@ def top_level_entries(ref):
     return [l.strip() for l in git("ls-tree", "--name-only", ref).splitlines() if l.strip()]
 
 
+def safe_extractall(tf, dest):
+    """Extract a git archive safely on both old and new Python versions.
+
+    Python 3.12 added tarfile's ``filter='data'`` protection. On older Python,
+    reject links, devices, absolute paths, and traversal before extraction. Git
+    archives for this static site do not require links, so failing closed is the
+    safest compatible behavior.
+    """
+    if sys.version_info >= (3, 12):
+        tf.extractall(dest, filter="data")
+        return
+
+    root = os.path.realpath(dest)
+    members = tf.getmembers()
+    for member in members:
+        target = os.path.realpath(os.path.join(root, member.name))
+        try:
+            inside_root = os.path.commonpath((root, target)) == root
+        except ValueError:
+            inside_root = False
+        if not inside_root or os.path.isabs(member.name):
+            raise ValueError(f"unsafe archive path: {member.name!r}")
+        if member.issym() or member.islnk() or member.isdev():
+            raise ValueError(f"unsupported archive member: {member.name!r}")
+    tf.extractall(dest, members=members)
+
+
 def archive_extract(ref, dest, paths):
     """git archive <ref> -- <paths...> | extract into dest. paths=None => whole tree."""
     os.makedirs(dest, exist_ok=True)
@@ -240,12 +290,24 @@ def archive_extract(ref, dest, paths):
         cmd += ["--", *paths]
     proc = subprocess.run(cmd, check=True, capture_output=True)
     with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tf:
-        tf.extractall(dest, filter="data")   # 3.12+ safe-extract filter
+        safe_extractall(tf, dest)
 
 
 def resolve_ref(branch):
-    """Pick a git ref that exists for a branch name (local or remote-tracking)."""
-    for candidate in (branch, f"origin/{branch}"):
+    """Pick the checked-out branch, otherwise prefer the fetched remote tip.
+
+    This keeps unpushed work previewable while preventing an old local ``main``
+    ref from silently becoming the base after ``git fetch`` refreshed origin/main.
+    """
+    if branch.startswith("origin/"):
+        candidates = (branch,)
+    else:
+        current = subprocess.run(
+            ["git", "branch", "--show-current"], capture_output=True, text=True
+        ).stdout.strip()
+        candidates = ((branch, f"origin/{branch}") if current == branch
+                      else (f"origin/{branch}", branch))
+    for candidate in candidates:
         if subprocess.run(["git", "rev-parse", "--verify", "--quiet", candidate],
                           capture_output=True).returncode == 0:
             return candidate
@@ -315,14 +377,13 @@ def build_root(out, base_branch, data_mode):
         print(f"  root: {base_branch} full tree (incl data/) copied")
 
 
-def build_preview(out, branch, base_ref, data_mode):
+def build_preview(out, branch, slug, base_ref, data_mode):
     """Assemble one branch's preview into preview/<slug>/.
     Default = FRONT-END ONLY, sharing root data via the fetch-shim. A branch gets
     its OWN data/ copy when EITHER it carries the .preview-full-data marker (manual
     override) OR its data/ differs from the base branch (auto-detect) — so a
     data-changing branch's preview always shows ITS data, never main's, no flag needed."""
     ref = resolve_ref(branch)
-    slug = slugify(branch)
     dest = os.path.join(out, "preview", slug)
     marker = branch_has_marker(ref)
     differs = branch_data_differs(base_ref, ref)
@@ -453,9 +514,10 @@ def main():
               f"{sorted(pr_branches) if pr_branches else '(none)'}")
         branches = list_branches(args.base_branch, base_ref, pr_branches)
     previews = []
+    slugs = assign_preview_slugs(branches)
     for b in branches:
         try:
-            previews.append(build_preview(out, b, base_ref, args.data_mode))
+            previews.append(build_preview(out, b, slugs[b], base_ref, args.data_mode))
         except subprocess.CalledProcessError as e:
             print(f"  !! skipped {b}: {e.stderr.decode() if e.stderr else e}", file=sys.stderr)
 
