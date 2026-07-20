@@ -33,6 +33,25 @@ except ImportError:
     print("h3 not installed. run: pip install h3")
     exit(1)
 
+# land/water mask — used to decide whether a beyond-crawl-radius cell with no
+# OSRM data should get a haversine ground estimate (land) or be dropped (ocean).
+# see query_cell_fast's OSRM_CRAWL_RADIUS_KM branch + ROUTING.md snap-artifact section.
+try:
+    from global_land_mask import globe as _globe
+
+    def is_land(lat, lng):
+        """True if (lat, lng) is over land per the bundled ~1km global mask."""
+        return bool(_globe.is_land(lat, lng))
+except ImportError:
+    _globe = None
+
+    def is_land(lat, lng):
+        # no mask installed — fail CLOSED (treat as ocean) so we never
+        # reintroduce the far-offshore snap blobs ROUTING.md describes. the
+        # cost is that the 200-400km land holes stay unfilled. install
+        # global-land-mask (pip install global-land-mask) to fill them.
+        return False
+
 
 # =============================================================================
 # CONFIGURATION
@@ -47,8 +66,15 @@ CHUNKED_RESOLUTIONS = [5, 6]
 # which parent resolution to group chunks by
 CHUNK_PARENT_RES = {5: 1, 6: 2}
 
-# max ground distance from airport to cell (km)
+# max ground distance from airport to cell (km). applies to OCEAN cells and to
+# the origin drive-only check.
 MAX_GROUND_KM = 400
+
+# extended ground reach for LAND cells (km). remote-interior land can be
+# 400-600km from its nearest REACHABLE airport; without a longer reach those
+# cells render as white holes. gated by a land-mask check so it never paints
+# ocean. measured AU-outback holes top out ~593km from a reachable airport.
+EXTENDED_GROUND_KM = 600
 
 # OSRM crawl radius (km) — must match osrm-crawler.py MAX_DRIVE_KM.
 # cells within this radius with no OSRM data are water/unreachable.
@@ -335,10 +361,20 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
     best_total = float('inf')
     best_info = None
 
+    # land cells get a longer ground reach than ocean cells. remote-interior
+    # cells (outback, siberia, sahara, amazon) can sit 400-600km from their
+    # NEAREST REACHABLE airport — beyond MAX_GROUND_KM — because the closer
+    # airstrips have no flights into the origin's network and so aren't
+    # candidates. without this they fall through the candidate scan entirely
+    # and render as white holes. the land gate keeps the extended reach from
+    # painting ocean cells (the snap-blob failure mode ROUTING.md describes).
+    cell_is_land = is_land(lat, lng)
+    ground_limit = EXTENDED_GROUND_KM if cell_is_land else MAX_GROUND_KM
+
     for bucket in nearby_buckets:
         for code, apt_lat, apt_lng, result in spatial_index.get(bucket, []):
             dist_km = haversine_km(lat, lng, apt_lat, apt_lng)
-            if dist_km > MAX_GROUND_KM:
+            if dist_km > ground_limit:
                 continue
 
             # ground_from: prefer OSRM, fall back to haversine.
@@ -348,16 +384,23 @@ def query_cell_fast(lat, lng, spatial_index, airports, origin_cfg,
             osrm_time = osrm_ground_time(osrm_data, code, lat, lng)
             used_osrm = False
             if osrm_time == -1:
-                # no OSRM data for this airport at all — haversine fallback
+                # no OSRM data for this airport at all — haversine fallback.
+                # (beyond MAX_GROUND_KM only reachable here for land cells, per
+                # the ground_limit gate above, so this can't paint ocean.)
                 ground_from = estimate_ground_minutes(dist_km)
             elif osrm_time is None:
                 # airport has OSRM data but cell not found
                 if dist_km <= OSRM_CRAWL_RADIUS_KM:
                     continue  # within crawl radius → water/unreachable
+                elif cell_is_land:
+                    # beyond crawl radius AND on land — OSRM simply wasn't
+                    # crawled this far out, so backfill with a haversine
+                    # estimate. the land gate keeps far-offshore ocean cells
+                    # from getting fake times (the snap-blob failure mode);
+                    # snap blobs are a within-radius problem, not this branch.
+                    ground_from = estimate_ground_minutes(dist_km)
                 else:
-                    # beyond crawl radius — OSRM was crawled for this airport
-                    # but didn't include this cell. trust that: it's water,
-                    # unreachable, or too far. don't backfill with haversine.
+                    # beyond crawl radius and over water — drop it.
                     continue
             else:
                 ground_from = osrm_time
@@ -572,6 +615,12 @@ def precompute_origin(origin_name, airports, routes):
     print(f"\n{'='*60}")
     print(f"pre-computing isochrone for {origin_cfg['name']}")
     print(f"{'='*60}")
+    if _globe is not None:
+        print(f"  land mask: ON — land cells reach airports up to {EXTENDED_GROUND_KM}km "
+              f"(ocean stays {MAX_GROUND_KM}km)")
+    else:
+        print("  land mask: OFF (global-land-mask not installed) — remote land")
+        print("             holes will NOT fill. run: pip install global-land-mask")
 
     # step 1: run dijkstra (once)
     print("\nrunning dijkstra...")
