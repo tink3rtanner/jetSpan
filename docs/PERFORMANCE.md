@@ -7,6 +7,41 @@ Benchmarks should be re-run after significant changes to measure improvement/reg
 
 ## How to Benchmark
 
+### Comprehensive browser journey (recommended)
+
+Start a static server, then run the Playwright driver from another terminal:
+
+```bash
+python -m http.server 8899
+npm install --no-save playwright   # once, if Playwright is not already available
+node scripts/run-interaction-bench.mjs --label my-change
+node scripts/run-interaction-bench.mjs \
+  --label my-change \
+  --out docs/benchmarks/my-change.json \
+  --compare docs/benchmarks/baseline.json
+```
+
+The driver uses the installed Chrome on macOS and Playwright Chromium elsewhere. It covers
+continuous pans at dense zooms, every zoom-resolution threshold in both directions, cold and
+warm chunk visits, 14 global pan/load stops, rapid-navigation races, date-line views, palette
+and visibility controls, trusted hover tooltips, info-panel transitions, long zooms, globe and
+bearing rotation, and multi-pin/Escape behavior. Reports include startup transfer cost, frame
+percentiles, jank, long tasks, chunk/resource timing, per-stage grid timing, and ranked hotspots.
+
+The same suite runs without a build step on static hosting at `_benchmark_runner.html`. Its
+download button saves the JSON report locally, so friends can benchmark their own machines from
+the GitHub Pages deployment.
+
+Before interpreting timings, run both correctness suites:
+
+- `_test_runner.html` validates static data and file integrity.
+- `runTests()` in the `isochrone.html` console validates browser rendering and interactions.
+
+Machine-to-machine numbers are directional. Compare revisions on the same browser, viewport,
+power state, and server; use failures and hotspot rankings as the portable signal.
+
+### Legacy focused benchmark
+
 Built into `isochrone.html` — open browser console after page loads:
 
 ```javascript
